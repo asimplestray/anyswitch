@@ -7,7 +7,7 @@ Static binary translation for Nintendo Switch games (ARM64) to Linux and Windows
 ## How it works
 
 ```
-decrypted main.nso (ARM64)
+main.nso (ARM64)
   → ElfReader (headers, PT_DYNAMIC, DT_RELA / DT_JMPREL)
   → Remill + LLVM (ARM64 → x86-64, optional)
   → SysVDynamicSectionBuilder (.dynsym / .dynstr / .dynamic)
@@ -54,15 +54,14 @@ cmake --build build --target libs            # libc.prx + libkernel.prx + libnx.
 cmake --build build --target libnx libc libkernel
 ```
 
-Convert a game you decrypted yourself:
+Convert a homebrew `.nro`:
 
 ```sh
 ./build/core/relinker/relinker \
-  --input game/exefs/main.nso \
+  --input Checkpoint.nro \
   --output converted_game/game.elf \
   --rpath '$ORIGIN/libs'
 cp build/core/libs/prx/*/*.prx converted_game/libs/ 2>/dev/null || true
-cp -r game/romfs converted_game/app0/
 ./converted_game/game.elf
 ```
 
@@ -98,7 +97,13 @@ Good first issues are labeled `good first issue`. See [CONTRIBUTING.md](CONTRIBU
 
 ## Legal
 
-Interoperability and preservation only. This project ships no games, keys, firmware, or Nintendo code. It consumes user-provided decrypted binaries; the decryption process is outside this project's scope. All system libraries are clean-room host reimplementations against publicly documented interfaces.
+Interoperability and preservation only. This project ships no games, keys,
+firmware, or Nintendo code. All system libraries are clean-room host
+reimplementations written against publicly documented interfaces, in the
+tradition of Dolphin and PPSSPP.
+
+It targets homebrew `.nro` binaries. See [CONTRIBUTING.md](CONTRIBUTING.md)
+for the project's content policy.
 
 ## License
 

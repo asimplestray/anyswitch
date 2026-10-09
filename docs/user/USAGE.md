@@ -25,17 +25,16 @@ cmake --build build --parallel
 
 ## Porting a Game
 
-### Step 1: Obtain a decrypted Switch binary
+### Step 1: Get a binary
 
-AnySwitch consumes **user-provided, already-decrypted** executables
-(`.nro` / `.nso`). Homebrew `.nro` files are plaintext and work out of the
-box — no additional steps.
+AnySwitch loads Switch `.nro` and `.nso` executables (plus ARM64 ELF64).
+Homebrew `.nro` files work out of the box — they are plaintext and need no
+extra preparation:
 
-For commercial games you must supply a decrypted copy that you legally own.
-AnySwitch does not ship, generate, or provide decryption tooling, keys, or
-firmware, and this project does not document that process. Our pipeline
-starts at the point where you already hold a decrypted binary; how you got
-there is outside this project's scope and support.
+```sh
+# e.g. a homebrew release you downloaded
+ls Checkpoint.nro
+```
 
 ### Step 2: Prepare directory layout
 
@@ -53,8 +52,7 @@ game/
 
 ```bash
 # The relinker translates ARM64 → x86-64 and patches the binary.
-# Input can be a decrypted main.nso (NSO0, uncompressed or LZ4), a homebrew
-# .nro (NRO0, plaintext — no decryption needed), or an ARM64 ELF64.
+# Input formats: NSO0 (uncompressed or LZ4), NRO0, or ARM64 ELF64.
 # ZBIC-compressed NSOs and hash verification are not supported.
 ./build/core/relinker/relinker \
     --input game/exefs/main.nso \

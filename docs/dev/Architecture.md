@@ -8,7 +8,7 @@ AnySwitch ports Nintendo Switch games from ARM64 (AArch64) to x86-64 Linux/Windo
 
 ### 1. Relinker (core/relinker)
 
-The main executable that converts a decrypted Switch NSO/ELF binary into a host-native executable.
+The main executable that converts a Switch NSO/ELF binary into a host-native executable.
 
 **Pipeline:**
 1. **ELF parsing** (`ElfReader.cpp`) — reads the ARM64 ELF headers, program headers, dynamic segment, and relocations
@@ -70,7 +70,7 @@ Switch games use dynamic linking with symbol names from `.nro`/`.nso` files. The
 ## Data Flow
 
 ```
-User input: decrypted_game.nso + game_assets/
+User input: game.nso + game_assets/
 
 ┌─────────────────┐    ┌──────────────────┐
 │  NSO/ELF Parser  │    │ ARM64 Code Segs  │

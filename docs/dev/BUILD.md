@@ -72,8 +72,8 @@ AnySwitch/
 ## How to Port a Switch Game
 
 ```bash
-# 1. Start from a decrypted main.nso you already have (user responsibility;
-#    decryption is outside this project's scope and not documented here)
+# 1. Start from a homebrew .nro or an .nso you have
+#    (see docs/user/USAGE.md for the supported formats)
 
 # 2. Run the relinker
 ./build/core/relinker/relinker \
@@ -95,10 +95,9 @@ cp -r game_assets/ game_output/app0/
 
 This project is for **interoperability and preservation only**. It:
 - Does not include, distribute, or provide copyrighted firmware
-- Does not include, generate, or provide cryptographic keys
-- Does not document or link to decryption tooling
-- Consumes user-provided, already-decrypted binaries; obtaining them is the
-  user's responsibility and outside this project's scope
-- Implements all system libraries from scratch using publicly documented interfaces
+- Does not include cryptographic keys
+- Does not ship or link any Nintendo code
+- Implements all system libraries from scratch against publicly documented interfaces
+- Is developed and tested against homebrew `.nro` binaries
 
 Licensed under the MIT License. See LICENSE.

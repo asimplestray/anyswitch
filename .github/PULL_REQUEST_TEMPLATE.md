@@ -11,6 +11,6 @@
 ## Checklist
 
 - [ ] No games, keys, firmware, dumps, or copyrighted data included
-- [ ] No decryption tooling, keysets, or "how to dump your Switch" content
+- [ ] No decryption tooling, keysets, or proprietary-binary acquisition content
 - [ ] Tests added or updated for the changed behavior
 - [ ] Docs updated (`README`, `docs/`, or module README as needed)

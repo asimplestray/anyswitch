@@ -9,11 +9,10 @@ Thanks for helping. This project is alpha, so small, well-tested PRs beat large 
 - `#pragma once` for new headers (legacy include guards are being migrated).
 - Prefer `std::unique_ptr` for ownership, `override`/`final`/`constexpr`/`noexcept` where correct.
 - No games, keys, firmware, dumps, or Nintendo-copyrighted material. Ever.
-- **No decryption tooling, keysets, or documentation of how to obtain
-  decrypted content.** The project's legal posture depends on it: we consume
-  user-provided decrypted binaries and stay out of that process entirely.
-  PRs adding such content are closed without review.
-- You must own what you test with; only synthetic fixtures may be committed.
+- **No decryption tooling, keysets, or content about obtaining proprietary
+  binaries.** AnySwitch is developed and tested against homebrew `.nro`
+  binaries; PRs adding such material are closed without review.
+- Only synthetic fixtures may be committed.
 
 ## Workflow
 
