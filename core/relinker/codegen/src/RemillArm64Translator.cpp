@@ -311,18 +311,7 @@ public:
         if (result.CodeOffsets.empty())
             return result;
 
-        if (const char* pre = std::getenv("ANYSWITCH_DUMP_PRE")) {
-            (void)pre;
-            std::error_code ec;
-            llvm::raw_fd_ostream bcOut("/tmp/asw_pre.bc", ec);
-            if (!ec)
-                llvm::WriteBitcodeToFile(*mod, bcOut);
-        }
-
-        if (std::getenv("ANYSWITCH_NO_STRIP"))
-            std::cerr << "Strip disabled by env\n";
-        else
-            StripExpectIntrinsics(*mod);
+        StripExpectIntrinsics(*mod);
 
         std::string verifyErr;
         llvm::raw_string_ostream verifyOs(verifyErr);
