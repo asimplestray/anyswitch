@@ -102,30 +102,6 @@ void StripExpectIntrinsics(llvm::Module& mod) {
         call->eraseFromParent();
 }
 
-void WriteObjectToFile(const llvm::Module& mod, const char* path) {
-    std::string err;
-    const auto* target = llvm::TargetRegistry::lookupTarget(kX86Triple, err);
-    if (!target)
-        throw std::runtime_error("Cannot find x86-64 target: " + err);
-    llvm::TargetOptions opts;
-    std::unique_ptr<llvm::TargetMachine> tm(target->createTargetMachine(
-        llvm::Triple(kX86Triple), "generic", "", opts, std::nullopt, std::nullopt,
-        llvm::CodeGenOptLevel::Aggressive));
-    if (!tm)
-        throw std::runtime_error("Cannot create x86-64 TargetMachine");
-    std::error_code ec;
-    llvm::raw_fd_ostream out(path, ec);
-    if (ec)
-        throw std::runtime_error("Cannot open object output: " + ec.message());
-    llvm::legacy::PassManager pm;
-    if (tm->addPassesToEmitFile(pm, out, nullptr, llvm::CodeGenFileType::ObjectFile))
-        throw std::runtime_error("TargetMachine cannot emit object files");
-    auto& mutableMod = const_cast<llvm::Module&>(mod);
-    mutableMod.setTargetTriple(llvm::Triple(kX86Triple));
-    mutableMod.setDataLayout(tm->createDataLayout());
-    pm.run(mutableMod);
-}
-
 void Optimize(llvm::Module& mod) {
     llvm::LoopAnalysisManager lam;
     llvm::FunctionAnalysisManager fam;
@@ -172,7 +148,7 @@ std::vector<std::uint8_t> EmitObject(llvm::Module& mod,
                                       std::map<std::string, std::uint64_t>& outAddrs,
                                       std::vector<std::uint8_t>* objOut) {
     std::string err;
-    const auto* target = llvm::TargetRegistry::lookupTarget(kX86Triple, err);
+    const auto* target = llvm::TargetRegistry::lookupTarget(llvm::Triple(kX86Triple), err);
     if (!target)
         throw std::runtime_error("Cannot find x86-64 target: " + err);
 
@@ -308,9 +284,8 @@ public:
         if (!arch)
             throw std::runtime_error("Remill has no AArch64 backend");
 
-        // LoadArchSemantics also calls PrepareModule + InitFromSemanticsModule,
-        // which is what populates the arch's intrinsic table. Skipping that was
-        // the cause of the old segfaults on re-decode.
+        // LoadArchSemantics also prepares the module and initialises the arch's
+        // intrinsic table, both of which must happen before any decode.
         auto sem = SemanticsDir();
         std::vector<std::filesystem::path> semDirs;
         if (!sem.empty())
@@ -447,11 +422,8 @@ public:
             });
         }
 
-        // Debug aid (env-gated, never in default output):
-        //   ANYSWITCH_DUMP_LIFTED=sym -> print symbol table
-        //   ANYSWITCH_DUMP_LIFTED=bin -> write .text to /tmp/asw_text.bin
-        //   ANYSWITCH_DUMP_LIFTED=bc  -> write pre-emit module to /tmp/asw_preemit.bc
-        //   ANYSWITCH_EMIT_OBJECT=<p> -> write the relocatable object to <p>
+        // Emit the relocatable object so an external harness can link it
+        // against the guest runtime and execute the result.
         if (const char* obj = std::getenv("ANYSWITCH_EMIT_OBJECT")) {
             if (*obj) {
                 std::ofstream ofs(obj, std::ios::binary);
@@ -460,23 +432,22 @@ public:
                 ofs.write(reinterpret_cast<const char*>(objectBytes.data()),
                           static_cast<std::streamsize>(objectBytes.size()));
             }
-        }        if (const char* dump = std::getenv("ANYSWITCH_DUMP_LIFTED")) {
+        }
+
+        // Optional diagnostics, keyed off ANYSWITCH_DUMP_LIFTED:
+        //   sym         print the symbol table
+        //   <anything else>  path to write the emitted .text blob to
+        if (const char* dump = std::getenv("ANYSWITCH_DUMP_LIFTED")) {
             const std::string mode = dump;
             if (mode == "sym") {
                 std::cout << "Lifted symbols:\n";
                 for (const auto& [name, off] : symAddrs)
                     std::cout << "  +" << off << " " << name << "\n";
-            } else if (mode == "bin") {
-                FILE* f = std::fopen("/tmp/asw_text.bin", "wb");
-                if (f) {
-                    std::fwrite(result.MachineCode.data(), 1, result.MachineCode.size(), f);
-                    std::fclose(f);
-                }
-            } else if (mode == "bc") {
-                std::error_code ec;
-                llvm::raw_fd_ostream bcOut("/tmp/asw_preemit.bc", ec);
-                if (!ec)
-                    llvm::WriteBitcodeToFile(*mod, bcOut);
+            } else if (!mode.empty()) {
+                std::ofstream ofs(mode, std::ios::binary);
+                if (ofs)
+                    ofs.write(reinterpret_cast<const char*>(result.MachineCode.data()),
+                              static_cast<std::streamsize>(result.MachineCode.size()));
             }
         }
 

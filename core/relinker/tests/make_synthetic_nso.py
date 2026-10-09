@@ -58,7 +58,7 @@ def build_nso(text: bytes, rodata: bytes, data: bytes, bss: int = 0,
         else:
             comp = seg
         payloads.append(comp)
-        # hactool-style: uncompressed segments report csize == decomp size.
+        # Uncompressed segments report csize == decompressed size.
         csize.append(len(comp) if (flags & (1 << i)) else len(seg))
 
     text_mem, ro_mem = 0x0, align16(len(text))

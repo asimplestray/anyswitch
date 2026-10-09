@@ -3,7 +3,7 @@
 
 The .nro must come from a free homebrew release (e.g. Checkpoint) or your
 own build. No decryption is involved: homebrew .nro files are plaintext.
-Never point this at commercial NSP/XCI dumps or keys.
+Only synthetic fixtures may be committed.
 
 Usage:
     python3 test_real_nro.py --relinker <relinker> --nro <file.nro> [--out <file.elf>]

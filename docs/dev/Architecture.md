@@ -55,8 +55,8 @@ Host implementations of Switch system libraries compiled as `.prx` shared librar
 
 **Maxwell GPU bytecode → SPIR-V:**
 ```
-NVN shader binary → [MaxwellDecoder] → [GraphBuilder] → IR → 
-[SsaBuilder → ConstantFolder → DeadCodeEliminator] → 
+NVN shader binary → [MaxwellDecoder] → [GraphBuilder] → IR →
+[SsaBuilder → ConstantFolder → DeadCodeEliminator] →
 [ResourceTracker → BindingAllocator] → [SpirvEmitter] → SPIR-V
 ```
 
