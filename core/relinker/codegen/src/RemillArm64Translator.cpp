@@ -1,7 +1,7 @@
 #include <codegen/IArm64Translator.hpp>
 
 // Remill-based ARM64 → x86-64 translator
-// Requires Remill (https://github.com/trailofbits/remill) and LLVM
+// Requires Remill (https://github.com/lifting-bits/remill) and LLVM
 
 #ifdef ANYSWITCH_HAS_REMILL
 

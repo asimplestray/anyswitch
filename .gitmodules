@@ -1,6 +1,8 @@
 [submodule "3rdparty/remill"]
 	path = 3rdparty/remill
 	url = https://github.com/lifting-bits/remill.git
+	shallow = true
 [submodule "3rdparty/glslang"]
 	path = 3rdparty/glslang
 	url = https://github.com/KhronosGroup/glslang.git
+	shallow = true

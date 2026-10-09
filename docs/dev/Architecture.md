@@ -12,7 +12,7 @@ The main executable that converts a decrypted Switch NSO/ELF binary into a host-
 
 **Pipeline:**
 1. **ELF parsing** (`ElfReader.cpp`) — reads the ARM64 ELF headers, program headers, dynamic segment, and relocations
-2. **Code translation** (`RemillArm64Translator.cpp`) — uses [Remill](https://github.com/trailofbits/remill) to lift ARM64 instructions → LLVM IR → optimize → emit x86-64 machine code
+2. **Code translation** (`RemillArm64Translator.cpp`) — uses [Remill](https://github.com/lifting-bits/remill) to lift ARM64 instructions → LLVM IR → optimize → emit x86-64 machine code
 3. **Relocation processing** (`RelinkerPipeline.cpp`) — extracts `DT_RELA` and `DT_JMPREL` relocations (NRO symbols → host dynamic symbols), resolves call sites
 4. **Dynamic section rebuild** (`SysVDynamicSectionBuilder.cpp`) — rebuilds `.dynstr`, `.dynsym`, `.dynamic` with new symbol references
 5. **ELF/PE patching** (`LinuxElfPatcher.cpp` / `WindowsPePatcher.cpp`) — rewrites the ELF with x86-64 code, new program headers, entry stub, and interpreter

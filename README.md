@@ -38,6 +38,9 @@ Build:
 ```sh
 git clone https://github.com/anyswitch/anyswitch.git
 cd anyswitch
+# Optional: translation/shader deps stay empty unless you run:
+#   git submodule update --init --depth 1
+# (see 3rdparty/README.md; LLVM is a system package, never vendored)
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure

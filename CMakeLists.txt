@@ -12,6 +12,8 @@ option(ANYSWITCH_USE_SYSTEM_REMILL "Use system Remill instead of building from s
 option(ANYSWITCH_BUILD_SHARED_LIBS "Build PRX libraries as shared objects" ON)
 option(ANYSWITCH_BUILD_SHADER_RECOMPILER "Build the shader recompiler" OFF)
 
+option(ANYSWITCH_BUILD_VENDORED_REMILL "Build Remill from 3rdparty/remill (needs its superbuild deps)" OFF)
+
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # --- LLVM (optional - required for Remill-based translation) ---
@@ -27,22 +29,22 @@ else()
 endif()
 
 # --- Remill (optional - required for ARM64 lifting) ---
-# Prefers 3rdparty/remill when vendored, otherwise a system install when
-# ANYSWITCH_USE_SYSTEM_REMILL=ON. Translation stays disabled if neither exists.
+# Resolution order: system install (find_package) first, then an explicit
+# opt-in vendored source build. Never breaks the default configure.
 if(ANYSWITCH_HAS_LLVM)
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/remill/CMakeLists.txt" AND NOT ANYSWITCH_USE_SYSTEM_REMILL)
-        message(STATUS "Using vendored Remill from 3rdparty/remill")
+    find_package(remill QUIET)
+    if(remill_FOUND)
+        message(STATUS "Using Remill: ${remill_DIR}")
+        set(ANYSWITCH_HAS_REMILL ON)
+    elseif(ANYSWITCH_BUILD_VENDORED_REMILL AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/remill/CMakeLists.txt")
+        message(STATUS "Building vendored Remill from 3rdparty/remill")
         add_subdirectory(3rdparty/remill 3rdparty_build/remill EXCLUDE_FROM_ALL)
         set(ANYSWITCH_HAS_REMILL ON)
     else()
-        find_package(remill QUIET)
-        if(remill_FOUND)
-            message(STATUS "Using system Remill")
-            set(ANYSWITCH_HAS_REMILL ON)
-        else()
-            message(STATUS "Remill not found — ARM64→x86-64 codegen disabled")
-            set(ANYSWITCH_HAS_LLVM OFF)
-        endif()
+        message(STATUS "Remill not found — ARM64→x86-64 codegen disabled")
+        message(STATUS "  (system: -DANYSWITCH_USE_SYSTEM_REMILL=ON with remill installed, or see 3rdparty/README.md)")
+        set(ANYSWITCH_HAS_REMILL OFF)
+        set(ANYSWITCH_HAS_LLVM OFF)
     endif()
 endif()
 # --- glslang (for shader recompiler) - optional ---

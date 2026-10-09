@@ -11,15 +11,15 @@
 ## Build
 
 ```bash
-# Clone
+# Clone (submodules are optional and stay empty unless initialized)
 git clone https://github.com/anyswitch/anyswitch.git
 cd anyswitch
 
-# Remill/LLVM are optional. Without LLVM, ARM64→x86-64 codegen is disabled
-# and the relinker still builds for ELF patching work. To enable translation:
+# Only if you need ARM64 translation or shaders:
+#   git submodule update --init --depth 1
+# See 3rdparty/README.md. LLVM itself is never vendored:
 #   sudo apt install llvm-dev
-#   cmake -S . -B build -DANYSWITCH_ENABLE_LLVM=ON
-# Or point CMake at a Remill install (see 3rdparty/README.md).
+#   cmake -S . -B build -DANYSWITCH_ENABLE_LLVM=ON -DANYSWITCH_USE_SYSTEM_REMILL=ON
 
 # Configure
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DANYSWITCH_ENABLE_SPIRV_TOOLS=ON

@@ -11,6 +11,7 @@ git clone https://github.com/anyswitch/anyswitch.git
 cd anyswitch
 
 # Remill/LLVM are optional (translation disabled without them).
+#   git submodule update --init --depth 1   # only for translation/shaders
 # See 3rdparty/README.md for details.
 # Or use system Remill: cmake -DANYSWITCH_USE_SYSTEM_REMILL=ON ...
 
