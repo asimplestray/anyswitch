@@ -38,7 +38,10 @@ int main(int argc, char** argv) {
     // The guest image (.text) is mapped at base 0 so the runtime can read
     // instructions from the PC it is handed - that is how an SVC is
     // recognised and dispatched. argv[1] optionally overrides the image.
-    const std::size_t memSize = 1u << 20; // 1 MiB guest address space
+    // A guest address space big enough for the image, its heap and a working
+    // set. The console gives a process far more than this, but it is the order
+    // of magnitude a small homebrew needs.
+    const std::size_t memSize = 256u << 20; // 256 MiB
     anyswitch::GuestMemory mem(memSize, 0);
 
     std::vector<std::uint8_t> image;

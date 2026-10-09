@@ -28,13 +28,17 @@ sys.path.insert(0, HERE)
 REMILL_INCLUDE = os.path.join(REPO, "3rdparty", "remill", "include")
 
 
-def build_runtime(workdir: str) -> str:
-    src = os.path.join(REPO, "core", "libs", "runtime", "AnyswitchRuntime.cpp")
-    out = os.path.join(workdir, "libanyswitch_runtime.o")
-    cmd = ["g++", "-std=c++20", "-w", "-I", REMILL_INCLUDE, "-I", REPO,
-           "-c", src, "-o", out]
-    subprocess.run(cmd, check=True, capture_output=True)
-    return out
+def build_runtime(workdir: str):
+    """Compiles the native guest runtime plus the syscall handlers."""
+    srcs = ["AnyswitchRuntime.cpp", "Syscalls.cpp"]
+    outs = []
+    for src in srcs:
+        path = os.path.join(REPO, "core", "libs", "runtime", src)
+        out = os.path.join(workdir, f"libanyswitch_{src}.o")
+        subprocess.run(["g++", "-std=c++20", "-w", "-I", REMILL_INCLUDE, "-I", REPO,
+                        "-c", path, "-o", out], check=True, capture_output=True)
+        outs.append(out)
+    return outs
 
 
 def main() -> int:
@@ -85,7 +89,7 @@ def main() -> int:
         print("SKIP: no translation output produced")
         return 0
 
-    runtime_o = build_runtime(probe_dir)
+    runtime_objs = build_runtime(probe_dir)
     main_cpp = os.path.join(REPO, "core", "relinker", "tests", "run_translated_main.cpp")
 
     passed = failed = 0
@@ -106,7 +110,7 @@ def main() -> int:
 
         link = subprocess.run(
             ["g++", "-std=c++20", "-w", "-I", REPO, "-I", REMILL_INCLUDE,
-             "-o", exe, main_cpp, obj, runtime_o],
+             "-o", exe, main_cpp, obj, *runtime_objs],
             capture_output=True, text=True)
         if link.returncode != 0:
             print(f"FAIL {name}: link failed: {link.stderr.strip()[:200]}")
@@ -125,15 +129,18 @@ def main() -> int:
             with open(text_path, "wb") as out:
                 out.write(f.read(text_size))
 
-        run = subprocess.run([exe, text_path], capture_output=True, text=True)
+        trace = dict(os.environ, ANYSWITCH_TRACE_SYSCALLS="1")
+        run = subprocess.run([exe, text_path], capture_output=True, text=True,
+                             env=trace)
         got = run.stdout.strip()
         ok = got == f"X0={want}"
         detail = got
-        # A syscall fixture must also reach the host: assert the dispatcher ran.
+        # A syscall fixture must also reach the host: assert the dispatcher
+        # recognised it. 66 is ReplyAndReceiveLight in the real syscall table.
         if name == "syscall":
-            if "anyswitch: guest svc #66" not in run.stderr:
+            if "svc #0x42" not in run.stderr:
                 ok = False
-                detail = f"{got} (syscall never reached the host)"
+                detail = f"{got} (syscall was not handled)"
         if ok:
             print(f"PASS {name} -> {detail}")
             passed += 1

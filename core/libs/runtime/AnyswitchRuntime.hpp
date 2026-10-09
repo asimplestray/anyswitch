@@ -46,12 +46,16 @@ public:
     std::uint64_t Base() const { return _base; }
     std::size_t Size() const { return _handle.size; }
 
+    // Bytes of guest image currently mapped, i.e. where a fresh heap can start.
+    static std::size_t LoadedBytes() { return _loadedBytes; }
+
 private:
     std::uint8_t* At(std::uint64_t addr, std::size_t len);
 
     Memory _handle;
     std::uint64_t _base;
     std::vector<std::uint8_t> _backing;
+    static inline std::size_t _loadedBytes = 0;
 };
 
 } // namespace anyswitch

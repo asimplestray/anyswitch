@@ -1,6 +1,7 @@
 #include "AnyswitchRuntime.hpp"
 
 #include "remill/Arch/AArch64/Runtime/State.h"
+#include "Syscalls.hpp"
 #include "remill/Arch/Runtime/HyperCall.h"
 #include "remill/Arch/Runtime/Intrinsics.h"
 
@@ -41,6 +42,9 @@ bool GuestMemory::Write(std::uint64_t addr, const void* in, std::size_t len) {
     auto* dst = At(addr, len);
     if (!dst)
         return false;
+    // Track how far the loaded image reaches so a fresh heap starts past it.
+    if (addr == _base && len > _loadedBytes)
+        _loadedBytes = len;
     std::memcpy(dst, in, len);
     return true;
 }
@@ -106,13 +110,20 @@ void SetX0(State& state, std::uint64_t value) {
 }
 
 // Services one guest syscall, writing results back into the register file the
-// way the console's kernel would. X0 carries the result. The handlers land
-// here as each one is implemented; today every number reports and returns 0,
-// which is enough to prove the seam end to end.
+// way the console's kernel would. X0 carries the result; X1+ carry extras.
 void ServiceSyscall(State& state, std::uint64_t svc, Memory* mem) {
-    (void)mem;
-    std::fprintf(stderr, "anyswitch: guest svc #%llu\n",
-                 static_cast<unsigned long long>(svc));
+    anyswitch::SyscallFrame frame{};
+    if (anyswitch::HandleSyscall(svc, frame, state, mem))
+        return;
+
+    // Unhandled: report loudly rather than silently returning a success the
+    // guest will believe.
+    static std::uint64_t reported = 0;
+    if (reported < 20) {
+        std::fprintf(stderr, "anyswitch: unhandled guest svc #%llu\n",
+                     static_cast<unsigned long long>(svc));
+        ++reported;
+    }
     SetX0(state, 0);
 }
 

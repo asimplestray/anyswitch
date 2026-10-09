@@ -38,9 +38,28 @@ Two kinds of gap appear alongside that:
    99.9% coverage of what discovery reached. These are forms Remill's AArch64
    semantics do not implement (`MRS`/`MSR` of system registers, some SIMD
    loads/stores) plus data that a straight-line scan read as code.
-2. **Syscalls are stubs.** The dispatcher recognises the vector and returns 0 in
-   X0. The guest therefore believes its memory is mapped, its files are open and
-   its handles are valid, when none of that has happened.
+2. **Syscalls were stubs.** Now implemented against the SwitchBrew table:
+   30+ handlers, arguments read from the guest's X0-X5, results written back. A
+   heap is allocated inside the guest address space rather than at a fabricated
+   base (returning a base outside the mapping made every allocation silently
+   disappear). Diagnostics are behind `ANYSWITCH_TRACE_SYSCALLS`.
+
+   With that, `rainbow.nro` runs this far:
+
+   ```
+   SetMemoryPermission, SetMemoryAttribute
+   GetInfo x10
+   SetHeapSize
+   svcBreak (Panic)          <- stops here
+   QueryMemory x2
+   ConnectToNamedPort
+   svcBreak (Panic) x more
+   ```
+
+   The likely cause of the panic is IPC: `ConnectToNamedPort` hands back a
+   synthetic session and `SendSyncRequest` replies with nothing, so the service
+   protocol the guest parses is empty. The panic's own message pointer is
+   invalid (`0xfffffebc`), so it cannot tell us more.
 
 ## What visible output still needs
 
