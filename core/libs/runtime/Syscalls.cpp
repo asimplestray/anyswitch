@@ -69,6 +69,11 @@ struct MemoryInfoLayout {
 constexpr std::uint32_t kMemStateNormal = 0;
 constexpr std::uint32_t kMemPermReadWrite = 3;
 
+// Heap region the runtime reports through svcGetInfo. Must stay inside the
+// address space GuestMemory maps, or the guest's allocator refuses to start.
+constexpr std::uint64_t kHeapRegionAddress = 0x10000000ull; // 256 MiB
+constexpr std::uint64_t kHeapRegionSize = 0x10000000ull;    // 256 MiB
+
 // A fake but consistent handle space. Switch uses 32-bit handles where the low
 // 16 bits index a table; real sessions are not modelled yet, so every handle
 // this runtime invents is reserved and never confused with a guest's own.
@@ -87,7 +92,9 @@ void SvSetHeapSize(SyscallFrame& f, State&, Memory* mem) {
     // boundary, which is the alignment SetHeapSize requires of the size.
     const auto imageEnd = mem ? GuestMemory::LoadedBytes() : 0;
     const auto heapBase = (imageEnd + 0x1FFFFFull) & ~0x1FFFFFull;
-    if (imageEnd == 0 || heapBase >= (mem ? mem->size : 0)) {
+    const auto inRegion = heapBase >= kHeapRegionAddress &&
+                          heapBase < kHeapRegionAddress + kHeapRegionSize;
+    if (imageEnd == 0 || !inRegion || heapBase >= (mem ? mem->size : 0)) {
         f.x[0] = 0xCA01; // invalid size
         return;
     }
@@ -135,7 +142,7 @@ void SvExitProcess(SyscallFrame&, State&, Memory*) {
 
 // svcGetInfo(uint64_t* out, InfoType type, Handle handle, uint64_t subtype)
 //          -> result, info in X1.
-void SvGetInfo(SyscallFrame& f, State& state, Memory* mem) {
+void SvGetInfo(SyscallFrame& f, State&, Memory* mem) {
     const auto type = static_cast<std::uint32_t>(f.x[1]);
     std::uint64_t value = 0;
     switch (type) {
@@ -143,13 +150,18 @@ void SvGetInfo(SyscallFrame& f, State& state, Memory* mem) {
         case 1:  // AllowedThreadPrioBitmask
             value = 0xFFFFFFFFFFFFFFFFull;
             break;
-        case 2:  // AliasRegionAddress
-        case 3:  // AliasRegionSize
+        // The heap region must describe memory the runtime actually owns. The
+        // console places it far above 0, but reporting a base outside our
+        // mapping makes the guest's allocator refuse to run.
         case 4:  // HeapRegionAddress
+            value = kHeapRegionAddress;
+            break;
         case 5:  // HeapRegionSize
-            value = 0x10000000ull;
+            value = kHeapRegionSize;
             break;
         case 6:  // TotalMemoryAvailable
+            value = kHeapRegionSize;
+            break;
         case 7:  // TotalMemoryUsage
             value = 0x1000000ull;
             break;
@@ -226,15 +238,17 @@ const Entry kHandlers[] = {
          f.x[0] = kResultSuccess;
          f.x[1] = id;
      }, "GetThreadId"},
-    {0x26, [](SyscallFrame& f, State&, Memory* mem) {
+    {0x26, [](SyscallFrame& f, State& state, Memory* mem) {
          // svcBreak is how libnx reports a panic or a failed assertion. The
          // reason and the value it points at are the diagnostic, so surface
          // them instead of swallowing them. A usable message pointer is not
          // available here, so only the raw values are shown.
-         std::fprintf(stderr, "anyswitch: guest svcBreak reason=%llu arg=0x%llx size=%llu\n",
+         // X30 is the link register: whoever called into the panic path.
+         std::fprintf(stderr, "anyswitch: guest svcBreak reason=%llu arg=0x%llx size=%llu lr=0x%llx\n",
                       static_cast<unsigned long long>(f.x[0]),
                       static_cast<unsigned long long>(f.x[1]),
-                      static_cast<unsigned long long>(f.x[2]));
+                      static_cast<unsigned long long>(f.x[2]),
+                      static_cast<unsigned long long>(ReadX(state, 30)));
          (void)mem;
          f.x[0] = kResultSuccess;
      }, "Break"},

@@ -91,6 +91,28 @@ extern "C" Memory* __remill_atomic_end(Memory* mem) { return mem; }
 // emulator in this project, so this is a translation gap to report.
 extern "C" Memory* __remill_aarch64_emulate_instruction(Memory* mem) { return mem; }
 
+// Floating-point exception state. There is no FPU trap model on the host, so
+// these are bookkeeping no-ops; the guest sees a warm FPU that never traps.
+extern "C" void __remill_fpu_exception_clear(std::int32_t) {}
+extern "C" void __remill_fpu_exception_raise(std::int32_t) {}
+extern "C" std::int32_t __remill_fpu_exception_test(std::int32_t) { return 0; }
+extern "C" void __remill_fpu_set_rounding(std::int32_t) {}
+extern "C" std::int32_t __remill_fpu_get_rounding() { return 0; }
+
+// Undefined-value helpers, used when the semantics need a poison value rather
+// than a concrete one. Zero is a safe stand-in.
+#define DEFINE_UNDEFINED(name, type) \
+    extern "C" type __remill_undefined_##name() { return 0; }
+
+DEFINE_UNDEFINED(8, uint8_t)
+DEFINE_UNDEFINED(16, uint16_t)
+DEFINE_UNDEFINED(32, uint32_t)
+DEFINE_UNDEFINED(64, uint64_t)
+extern "C" float __remill_undefined_f32() { return 0.0f; }
+extern "C" double __remill_undefined_f64() { return 0.0; }
+
+#undef DEFINE_UNDEFINED
+
 // Register/PC offsets, measured against remill/Arch/AArch64/Runtime/State.h:
 //   offsetof(AArch64State, gpr) = 536, GPR.x0 = 8, GPR.pc = 520.
 namespace {

@@ -11,7 +11,7 @@ here and a homebrew that produces visible output.
 | Control flow | multi-block traces with taken/untaken conditional branches and backward branches |
 | Execution with correct results | 7 hand-built fixtures assert the guest's X0 |
 | Guest syscalls reach the host | `SVC` is dispatched and the vector printed |
-| A real homebrew executes | `rainbow.nro` runs its startup, its main loop and its exit |
+| Two homebrew binaries execute | `rainbow.nro` and a 376 KB controller tester both run their startup, then stop at the same wall |
 
 `rainbow.nro` is not committed (homebrew binaries are gitignored). Fetch it with:
 
@@ -56,10 +56,14 @@ Two kinds of gap appear alongside that:
    svcBreak (Panic) x more
    ```
 
-   The likely cause of the panic is IPC: `ConnectToNamedPort` hands back a
-   synthetic session and `SendSyncRequest` replies with nothing, so the service
-   protocol the guest parses is empty. The panic's own message pointer is
-   invalid (`0xfffffebc`), so it cannot tell us more.
+   A second binary (a 376 KB controller tester) stops at exactly the same
+   place, so this is a common libnx-init gap rather than anything app-specific.
+
+   Adding the link register to the svcBreak diagnostic put its LR at 0x1b9ac,
+   which is a zero word inside .text - not an instruction. So the guest is
+   reaching an address that holds data. Either it really is calling into a data
+   table, or X30 has been clobbered by the time we read it. Both point at the
+   same next investigation, not at a missing syscall.
 
 ## What visible output still needs
 

@@ -41,7 +41,9 @@ int main(int argc, char** argv) {
     // A guest address space big enough for the image, its heap and a working
     // set. The console gives a process far more than this, but it is the order
     // of magnitude a small homebrew needs.
-    const std::size_t memSize = 256u << 20; // 256 MiB
+    // The reported heap region sits at 256 MiB, so the address space has to
+    // cover it: image + heap + working set.
+    const std::size_t memSize = 512u << 20; // 512 MiB
     anyswitch::GuestMemory mem(memSize, 0);
 
     std::vector<std::uint8_t> image;
