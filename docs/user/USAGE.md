@@ -52,12 +52,16 @@ game/
 
 ```bash
 # The relinker translates ARM64 → x86-64 and patches the binary.
-# Input can be a decrypted main.nso (NSO0, uncompressed or LZ4) or an
-# ARM64 ELF64. ZBIC-compressed NSOs and hash verification are not supported.
+# Input can be a decrypted main.nso (NSO0, uncompressed or LZ4), a homebrew
+# .nro (NRO0, plaintext — no decryption needed), or an ARM64 ELF64.
+# ZBIC-compressed NSOs and hash verification are not supported.
 ./build/core/relinker/relinker \
     --input game/exefs/main.nso \
     --output converted_game/game.elf \
     --rpath '$ORIGIN/libs'
+
+# Homebrew example (Checkpoint.nro, validated against v5.2.0):
+./build/core/relinker/relinker Checkpoint.nro checkpoint.elf
 ```
 
 ### Step 4: Assemble runtime

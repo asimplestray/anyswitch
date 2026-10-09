@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from make_synthetic_arm64_elf import (DEFAULT_DATA, DEFAULT_RODATA,
                                       DEFAULT_TEXT, build_elf)
-from make_synthetic_nso import build_nso, match_block_example
+from make_synthetic_nso import build_nro, build_nso, match_block_example
 
 INTERP = b"/lib64/ld-linux-x86-64.so.2"
 
@@ -88,7 +88,14 @@ def main() -> int:
     check_host_elf(out, "match.nso", expected)
     print("PASS LZ4 match decoding")
 
-    # 5. Truncated NSO must be rejected, not crash.
+    # 5. Synthetic NRO (homebrew layout).
+    out = run_relinker(args.relinker,
+                       build_nro(DEFAULT_TEXT, DEFAULT_RODATA, DEFAULT_DATA),
+                       "synth.nro", workdir)
+    check_host_elf(out, "synth.nro", DEFAULT_RODATA)
+    print("PASS synthetic NRO -> host ELF")
+
+    # 6. Truncated NSO must be rejected, not crash.
     bad = os.path.join(workdir, "bad.nso")
     with open(bad, "wb") as f:
         f.write(b"NSO0" + b"\x00" * 10)

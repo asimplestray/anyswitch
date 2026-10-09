@@ -10,6 +10,7 @@
 #include <codegen/IArm64Translator.hpp>
 #include <relinker/parsing/ElfReader.hpp>
 #include <relinker/parsing/NsoReader.hpp>
+#include <relinker/parsing/NroReader.hpp>
 #include <relinker/pipeline/RelinkerPipeline.hpp>
 #include <relinker/output/SysVDynamicSectionBuilder.hpp>
 #include <filesystem>
@@ -37,6 +38,13 @@ int main(const int argc, char* argv[]) {
                       << " data=" << nso.data.bytes.size()
                       << " bss=" << nso.bssSize << "\n";
             sourceBytes = Relinker::NsoReader::ConvertToElf(nso);
+        } else if (Relinker::NroReader::IsNro(sourceBytes)) {
+            auto nro = Relinker::NroReader::Parse(sourceBytes);
+            std::cout << "NRO detected: text=" << nro.text.bytes.size()
+                      << " rodata=" << nro.rodata.bytes.size()
+                      << " data=" << nro.data.bytes.size()
+                      << " bss=" << nro.bssSize << "\n";
+            sourceBytes = Relinker::NroReader::ConvertToElf(nro);
         }
 
         auto elfReader = std::make_shared<Relinker::ElfReader>(sourceBytes);

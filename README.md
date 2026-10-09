@@ -78,6 +78,7 @@ Without LLVM/Remill the project still configures and builds; codegen is disabled
 ## Roadmap
 
 - [x] NSO0 loader (uncompressed + LZ4) with synthetic ELF/NSO e2e fixtures
+- [x] NRO0 loader (homebrew) validated on real Checkpoint.nro (5 MB)
 - [ ] Splice translated x86-64 code back into the output ELF (`core/relinker/main.cpp`)
 - [ ] Windows PE backend (`WindowsElfPatcher.cpp` stub)
 - [ ] Maxwell decoder → IR → SPIR-V stages (`core/shader/recompiler/`)

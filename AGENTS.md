@@ -50,6 +50,8 @@ The project has 4 main parts:
 - `core/relinker/main.cpp` — entry point
 - `core/relinker/relinker/src/pipeline/RelinkerPipeline.cpp` — core translation pipeline
 - `core/relinker/relinker/src/parsing/NsoReader.cpp` — NSO0 loader (LZ4) + NSO→ELF wrap
+- `core/relinker/relinker/src/parsing/NroReader.cpp` — NRO0 loader (homebrew) + NRO→ELF wrap
+- `core/relinker/relinker/src/parsing/ElfImageBuilder.cpp` — shared segments→ELF64 wrapper
 - `core/relinker/tests/test_end_to_end.py` — synthetic ELF/NSO fixtures through the relinker
 - `core/relinker/codegen/src/RemillArm64Translator.cpp` — ARM64→x86-64 via Remill
 - `core/relinker/elfpatcher/src/linux/LinuxElfPatcher.cpp` — ELF rewriting

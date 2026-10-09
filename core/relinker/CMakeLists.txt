@@ -6,7 +6,9 @@ set(RELINKER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/io/src/FileReader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/io/src/FileWriter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/parsing/ElfReader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/parsing/ElfImageBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/parsing/NsoReader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/parsing/NroReader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/pipeline/RelinkerPipeline.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/output/SysVDynamicSectionBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/output/CallRegistryWriter.cpp

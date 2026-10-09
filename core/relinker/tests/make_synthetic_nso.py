@@ -87,6 +87,27 @@ def build_nso(text: bytes, rodata: bytes, data: bytes, bss: int = 0,
     return out
 
 
+def build_nro(text: bytes, rodata: bytes, data: bytes, bss: int = 0) -> bytes:
+    """Minimal NRO0 image: 0x80-byte header, contiguous segments."""
+    text_mem, ro_mem = 0x0, align16(len(text))
+    data_mem = align16(ro_mem + len(rodata))
+
+    hdr = bytearray(0x80)
+    hdr[0x10:0x14] = b"NRO0"
+    struct.pack_into("<I", hdr, 0x14, 0)  # version
+    struct.pack_into("<I", hdr, 0x20, text_mem)
+    struct.pack_into("<I", hdr, 0x24, len(text))
+    struct.pack_into("<I", hdr, 0x28, ro_mem)
+    struct.pack_into("<I", hdr, 0x2C, len(rodata))
+    struct.pack_into("<I", hdr, 0x30, data_mem)
+    struct.pack_into("<I", hdr, 0x34, len(data))
+    struct.pack_into("<I", hdr, 0x38, bss)
+    body = bytes(hdr) + text + rodata + data
+    # Real NROs report the segment bytes only (excludes the header).
+    struct.pack_into("<I", hdr, 0x18, len(text) + len(rodata) + len(data))
+    return bytes(hdr) + text + rodata + data
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print(f"Usage: {sys.argv[0]} <plain.nso> <lz4.nso>", file=sys.stderr)
