@@ -67,7 +67,7 @@ add_subdirectory(core/relinker)
 add_subdirectory(core/libs)
 
 # Convenience meta-target: builds all host system libraries.
-add_custom_target(libs DEPENDS libc libkernel libnx)
+add_custom_target(libs DEPENDS libc libkernel libkernel_prx libnx)
 
 if(ANYSWITCH_BUILD_SHADER_RECOMPILER)
     add_subdirectory(core/shader/recompiler)

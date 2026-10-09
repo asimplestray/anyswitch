@@ -15,6 +15,7 @@
 #include <string>
 
 #include "core/libs/runtime/AnyswitchRuntime.hpp"
+#include "libkernel/SyscallAbi.hpp"
 
 // The entry trace, produced by the relinker and named asw_trace_<guest addr>.
 extern "C" void* asw_trace_0(void* state, unsigned long pc, void* memory);
@@ -64,6 +65,8 @@ int main(int argc, char** argv) {
     // the PCs it is handed; that is how an SVC is recognised and dispatched.
     if (!image.empty() && !mem.Write(0, image.data(), image.size()))
         std::fprintf(stderr, "warning: guest image does not fit the address space\n");
+    else
+        libkernel::SetLoadedImageBytes(image.size());
 
     // Remill's State is a padded register file; zero it so flags start clean.
     std::vector<std::uint8_t> stateBytes(1200 + 64, 0);

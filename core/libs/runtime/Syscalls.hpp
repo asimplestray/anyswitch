@@ -6,26 +6,25 @@
 // (plus X1 and beyond for syscalls with extra outputs). The syscall number is
 // the immediate of the SVC instruction, not a register.
 //
-// Numbers and signatures follow the SwitchBrew SVC table.
+// The handlers themselves live in core/libs/libkernel, so they can be built as
+// a .prx for games and unit-tested in isolation. This header only declares the
+// seam the runtime drives.
+
+#include "libkernel/Memory.hpp"
 
 #include <cstdint>
 
 struct State;
-struct Memory;
 
 namespace anyswitch {
 
-// Result codes the guest checks.
-constexpr std::uint32_t kResultSuccess = 0;
-
-// Registers used to pass syscall arguments and read results.
+// The guest's flattened argument registers, as filled by the runtime.
 struct SyscallFrame {
     std::uint64_t x[6];
+    std::uint32_t w[6];
 };
 
-// Returns true when the syscall was recognised and handled. Handlers write
-// their results into `frame`; unrecognised numbers leave it untouched and
-// return false so the caller can report the gap.
+// Returns true when libkernel recognised and handled the syscall.
 bool HandleSyscall(std::uint64_t svc, SyscallFrame& frame, State& state, Memory* mem);
 
 } // namespace anyswitch

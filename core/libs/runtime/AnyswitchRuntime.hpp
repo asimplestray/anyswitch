@@ -19,12 +19,10 @@
 #include <cstdint>
 #include <vector>
 
-// Opaque to translated code. Remill never dereferences it; only the
-// read/write intrinsics below do, and those are ours.
-struct Memory {
-    std::uint8_t* data;
-    std::size_t size;
-};
+// Memory is defined once, in libkernel/Memory.hpp, so the host libraries and
+// the runtime share one type. Remill forward-declares it and never touches it;
+// the read/write intrinsics that do are ours.
+#include "libkernel/Memory.hpp"
 
 namespace anyswitch {
 

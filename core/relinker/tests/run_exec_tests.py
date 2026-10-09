@@ -26,17 +26,32 @@ REPO = os.path.normpath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, HERE)
 
 REMILL_INCLUDE = os.path.join(REPO, "3rdparty", "remill", "include")
+LIBKERNEL_INCLUDE = os.path.join(REPO, "core", "libs", "libkernel", "include")
 
 
 def build_runtime(workdir: str):
-    """Compiles the native guest runtime plus the syscall handlers."""
-    srcs = ["AnyswitchRuntime.cpp", "Syscalls.cpp"]
+    """Compiles the guest runtime, the dispatch shim, and libkernel.
+
+    libkernel is compiled from source here rather than linked as a CMake
+    target so the harness stays independent of the build tree.
+    """
+    jobs = [
+        ("runtime/AnyswitchRuntime.cpp", ["libkernel/include"]),
+        ("runtime/Syscalls.cpp", ["libkernel/include"]),
+        ("libkernel/src/Dispatch.cpp", ["libkernel/include"]),
+        ("libkernel/src/Memory.cpp", ["libkernel/include"]),
+        ("libkernel/src/Handle.cpp", ["libkernel/include"]),
+        ("libkernel/src/Info.cpp", ["libkernel/include"]),
+    ]
     outs = []
-    for src in srcs:
-        path = os.path.join(REPO, "core", "libs", "runtime", src)
-        out = os.path.join(workdir, f"libanyswitch_{src}.o")
-        subprocess.run(["g++", "-std=c++20", "-w", "-I", REMILL_INCLUDE, "-I", REPO,
-                        "-c", path, "-o", out], check=True, capture_output=True)
+    for src, extra in jobs:
+        path = os.path.join(REPO, "core", "libs", src)
+        out = os.path.join(workdir, "libanyswitch_" + src.replace("/", "_") + ".o")
+        cmd = ["g++", "-std=c++20", "-w", "-I", REMILL_INCLUDE, "-I", REPO,
+               "-c", path, "-o", out]
+        for inc in extra:
+            cmd += ["-I", os.path.join(REPO, "core", "libs", inc)]
+        subprocess.run(cmd, check=True, capture_output=True)
         outs.append(out)
     return outs
 
@@ -110,7 +125,8 @@ def main() -> int:
 
         link = subprocess.run(
             ["g++", "-std=c++20", "-w", "-I", REPO, "-I", REMILL_INCLUDE,
-             "-o", exe, main_cpp, obj, *runtime_objs],
+             "-I", LIBKERNEL_INCLUDE,
+             "-o", exe, main_cpp, obj, *runtime_objs, "-lm"],
             capture_output=True, text=True)
         if link.returncode != 0:
             print(f"FAIL {name}: link failed: {link.stderr.strip()[:200]}")
