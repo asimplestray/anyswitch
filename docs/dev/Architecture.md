@@ -23,10 +23,15 @@ The main executable that converts a decrypted Switch NSO/ELF binary into a host-
 the `3rdparty/README.md` Remill build):
 
 ```
-ARM64 bytes → [Remill decode] → per-instruction LLVM functions
-  → link aarch64.bc semantics → internalize + GlobalDCE + O2
+ARM64 bytes → [Remill decode + recursive descent] → per-instruction LLVM
+  functions → link aarch64.bc semantics → internalize + GlobalDCE + O2
   → x86-64 object → extract .text (+ per-function guest addresses)
 ```
+
+- Recursive descent from the entry point follows direct branches/calls and
+  never decodes data pockets (literal pools); indirect targets end a path.
+- Forms that decode but have no lifting support (e.g. MRS/MSR of unknown
+  system registers) are skipped without aborting the run.
 
 - Each guest instruction becomes one `asw_lifted_<addr>(State*, pc, Memory*)`
   function; dead semantics are dropped via `llvm.compiler.used` removal,

@@ -53,6 +53,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -80,6 +81,26 @@ std::string SemanticsPath() {
 #else
     return {};
 #endif
+}
+
+// llvm.expect is only a branch-prediction hint; LLVM 22's lowering pass
+// crashes on Remill-shaped expect chains, so strip them pre-optimization.
+void StripExpectIntrinsics(llvm::Module& mod) {
+    std::vector<llvm::CallInst*> dead;
+    for (auto& func : mod.functions()) {
+        for (auto& block : func) {
+            for (auto& instr : block) {
+                auto* call = llvm::dyn_cast<llvm::CallInst>(&instr);
+                if (!call || !call->getCalledFunction() ||
+                    !call->getCalledFunction()->getName().starts_with("llvm.expect"))
+                    continue;
+                call->replaceAllUsesWith(call->getArgOperand(0));
+                dead.push_back(call);
+            }
+        }
+    }
+    for (auto* call : dead)
+        call->eraseFromParent();
 }
 
 void Optimize(llvm::Module& mod) {
@@ -218,20 +239,36 @@ public:
         remill::IntrinsicTable intrinsics(mod.get());
         remill::InstructionLifter lifter(arch.get(), intrinsics);
 
-        std::size_t offset = 0;
-        std::size_t count = 0;
-        while (offset + kAArch64InstrSize <= arm64Code.size() && count < kMaxInstructions) {
-            const auto guestAddr = baseVAddr + offset;
+        // Recursive descent: follow direct branches from the entry point so
+        // data pockets (literal pools, jump tables) are never decoded as
+        // code. Indirect targets are unknown statically and end a path.
+        const auto codeEnd = baseVAddr + arm64Code.size();
+        auto inRange = [&](std::uint64_t pc) {
+            return pc >= baseVAddr && pc + kAArch64InstrSize <= codeEnd &&
+                   (pc % kAArch64InstrSize) == 0;
+        };
+        std::set<std::uint64_t> visited;
+        std::vector<std::uint64_t> worklist{baseVAddr};
+
+        while (!worklist.empty() && visited.size() < kMaxInstructions) {
+            const auto pc = worklist.back();
+            worklist.pop_back();
+            if (!inRange(pc) || !visited.insert(pc).second)
+                continue;
+            const auto offset = static_cast<std::size_t>(pc - baseVAddr);
+
             remill::Instruction inst;
             std::string_view bytes(reinterpret_cast<const char*>(arm64Code.data() + offset),
                                    kAArch64InstrSize);
             if (!arch->DecodeInstruction(
-                    guestAddr, bytes, inst, arch->CreateInitialContext()))
-                break;
+                    pc, bytes, inst, arch->CreateInitialContext()))
+                continue; // data, not code
 
-            auto* func = arch->DefineLiftedFunction(LiftedName(guestAddr), mod.get());
+            auto* func = arch->DefineLiftedFunction(LiftedName(pc), mod.get());
             if (!func)
                 throw std::runtime_error("Cannot define lifted function");
+            if (func->getParent() != mod.get())
+                throw std::runtime_error("Lifted function in wrong module");
             // DefineLiftedFunction pre-populates the entry block with state
             // scaffolding; append into it rather than creating a new block.
             auto* block = &func->getEntryBlock();
@@ -240,26 +277,57 @@ public:
             llvm::IRBuilder<> ir(block);
             auto [nextPcAddr, nextPcTy] =
                 lifter.LoadRegAddress(block, state, remill::kNextPCVariableName);
-            ir.CreateStore(llvm::ConstantInt::get(nextPcTy, guestAddr), nextPcAddr);
+            ir.CreateStore(llvm::ConstantInt::get(nextPcTy, pc), nextPcAddr);
 
-            if (lifter.LiftIntoBlock(inst, block, state) != remill::kLiftedInstruction)
-                break;
+            // Some forms decode but have no lifting support (e.g. MRS/MSR of
+            // unknown system registers). Drop the stub and keep walking.
+            if (lifter.LiftIntoBlock(inst, block, state) != remill::kLiftedInstruction) {
+                func->eraseFromParent();
+            } else {
+                auto [memAddr, memTy] =
+                    lifter.LoadRegAddress(block, state, remill::kMemoryVariableName);
+                ir.SetInsertPoint(block);
+                ir.CreateRet(ir.CreateLoad(memTy, memAddr));
 
-            auto [memAddr, memTy] =
-                lifter.LoadRegAddress(block, state, remill::kMemoryVariableName);
-            ir.SetInsertPoint(block);
-            ir.CreateRet(ir.CreateLoad(memTy, memAddr));
+                if (llvm::verifyFunction(*func, &llvm::errs()))
+                    throw std::runtime_error("Lifted function failed verification");
 
-            if (llvm::verifyFunction(*func, &llvm::errs()))
-                throw std::runtime_error("Lifted function failed verification");
+                result.CodeOffsets.push_back(pc);
+            }
 
-            result.CodeOffsets.push_back(guestAddr);
-            offset += kAArch64InstrSize;
-            ++count;
+            if (inst.IsDirectControlFlow())
+                worklist.push_back(inst.branch_taken_pc);
+            const bool uncondJump = inst.IsDirectControlFlow() &&
+                                    !inst.IsConditionalBranch() && !inst.IsFunctionCall();
+            const bool indirectNoReturn =
+                inst.IsIndirectControlFlow() && !inst.IsFunctionCall();
+            if (inst.IsConditionalBranch() ||
+                (!uncondJump && !indirectNoReturn && !inst.IsFunctionReturn())) {
+                // Fallthrough: normal flow, untaken conditional edge, call return.
+                worklist.push_back(inst.next_pc);
+            }
         }
 
         if (result.CodeOffsets.empty())
             return result;
+
+        if (const char* pre = std::getenv("ANYSWITCH_DUMP_PRE")) {
+            (void)pre;
+            std::error_code ec;
+            llvm::raw_fd_ostream bcOut("/tmp/asw_pre.bc", ec);
+            if (!ec)
+                llvm::WriteBitcodeToFile(*mod, bcOut);
+        }
+
+        if (std::getenv("ANYSWITCH_NO_STRIP"))
+            std::cerr << "Strip disabled by env\n";
+        else
+            StripExpectIntrinsics(*mod);
+
+        std::string verifyErr;
+        llvm::raw_string_ostream verifyOs(verifyErr);
+        if (llvm::verifyModule(*mod, &verifyOs))
+            throw std::runtime_error("Lifted module failed verification: " + verifyErr);
 
         Optimize(*mod);
 
