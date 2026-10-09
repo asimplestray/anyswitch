@@ -34,6 +34,13 @@ cmake --build build --target libnx libc libkernel --parallel
 ctest --test-dir build --output-on-failure
 ```
 
+End-to-end coverage (`Testing/relinker_end_to_end`) builds synthetic
+fixtures at test time — no games, keys, or firmware needed:
+`core/relinker/tests/make_synthetic_arm64_elf.py`,
+`make_synthetic_nso.py` (plain + LZ4), and `test_end_to_end.py`
+drive the relinker over ELF, uncompressed NSO, LZ4 NSO, an LZ4
+match-vector, and a truncated-NSO rejection case.
+
 ## Architecture
 
 ```

@@ -9,6 +9,7 @@
 #include <elfpatcher/general/SegmentFilter.hpp>
 #include <codegen/IArm64Translator.hpp>
 #include <relinker/parsing/ElfReader.hpp>
+#include <relinker/parsing/NsoReader.hpp>
 #include <relinker/pipeline/RelinkerPipeline.hpp>
 #include <relinker/output/SysVDynamicSectionBuilder.hpp>
 #include <filesystem>
@@ -28,6 +29,15 @@ int main(const int argc, char* argv[]) {
         Io::FileReader fileReader;
         Io::FileWriter fileWriter;
         auto sourceBytes = fileReader.Read(args.inputPath);
+
+        if (Relinker::NsoReader::IsNso(sourceBytes)) {
+            auto nso = Relinker::NsoReader::Parse(sourceBytes);
+            std::cout << "NSO detected: text=" << nso.text.bytes.size()
+                      << " rodata=" << nso.rodata.bytes.size()
+                      << " data=" << nso.data.bytes.size()
+                      << " bss=" << nso.bssSize << "\n";
+            sourceBytes = Relinker::NsoReader::ConvertToElf(nso);
+        }
 
         auto elfReader = std::make_shared<Relinker::ElfReader>(sourceBytes);
 

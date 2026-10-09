@@ -77,11 +77,11 @@ Without LLVM/Remill the project still configures and builds; codegen is disabled
 
 ## Roadmap
 
+- [x] NSO0 loader (uncompressed + LZ4) with synthetic ELF/NSO e2e fixtures
 - [ ] Splice translated x86-64 code back into the output ELF (`core/relinker/main.cpp`)
 - [ ] Windows PE backend (`WindowsElfPatcher.cpp` stub)
 - [ ] Maxwell decoder → IR → SPIR-V stages (`core/shader/recompiler/`)
 - [ ] Expand `libnx`/`libkernel` coverage with integration tests
-- [ ] Golden-file tests with synthetic NSO fixtures (no copyrighted data)
 
 Good first issues are labeled `good first issue`. See [CONTRIBUTING.md](CONTRIBUTING.md).
 

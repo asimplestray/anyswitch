@@ -19,3 +19,16 @@ add_test(NAME host_libs_built
     COMMAND ${CMAKE_COMMAND} -E echo "libs: libc.prx libkernel.prx libnx.prx"
 )
 
+# End-to-end: synthetic ARM64 ELF + NSO fixtures (plain, LZ4, match-vector,
+# truncated) through the relinker. Needs Python 3 + the built binary.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_FOUND)
+    add_test(NAME relinker_end_to_end
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/core/relinker/tests/test_end_to_end.py
+            --relinker $<TARGET_FILE:relinker>
+    )
+else()
+    message(STATUS "Python3 not found — relinker_end_to_end test disabled")
+endif()
+
