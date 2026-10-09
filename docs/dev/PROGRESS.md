@@ -21,11 +21,23 @@ curl -LO https://github.com/bward-dev1/rainbow-nro/releases/download/rainbow-v1/
 
 ## Where the wall is now
 
-The remaining failure is control reaching zero-word regions inside `.text`
-(0x48cc and friends), which means the guest is branching into data. That is
-consistent with indirect-call targets never being resolved: the relinker
-records each BLR/BR site and emits a fixup, but the fixup's target is still
-zero. Making those resolve is the next blocker.
+The remaining failure, now traced to its mechanism:
+
+`.text` is not pure code. 5.5% of it (1186 words, in 291 runs) is data
+embedded between functions and after calls - literal pools, jump tables,
+alignment. A trace that falls through a call with an unresolved target walks
+straight into that data and executes it.
+
+Concretely: the trace starting at 0x48b0 contains `BL` at 0x48c8 followed by a
+zero word at 0x48cc. When the call's target trace is unknown, the trace falls
+through instead of calling, so the guest ends up executing the zero word, which
+lifts to an error. That is the "unlifted instruction at guest 0x48cc" line,
+and it repeats because the same thing happens at every data run.
+
+So the next work is not "resolve indirect targets" in the abstract: it is to
+make a trace end at a call rather than fall through when the callee is unknown,
+and to give the driver a clean "no trace at this PC" stop instead of executing
+data. Only then does the guest's real control flow become observable.
 
 ## What the earlier run showed
 
