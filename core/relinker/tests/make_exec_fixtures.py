@@ -133,8 +133,15 @@ def main() -> int:
     outdir = sys.argv[1] if len(sys.argv) > 1 else "."
     os.makedirs(outdir, exist_ok=True)
 
+    def svc(n: int) -> bytes:
+        # SVC #n  : bits 31-24 = 0xD4, immediate in bits 20-5, LL = 0b00001
+        return struct.pack("<I", (0xD4 << 24) | ((n & 0xFFFF) << 5) | 0b00001)
+
     programs = {
         "ret42": mov_imm(0, 42) + ret(),
+        # A syscall in the middle of a trace: proves the guest->host seam and
+        # that discovery does not stop at the supervisor call.
+        "syscall": mov_imm(0, 42) + svc(66) + ret(),
         "add": mov_imm(0, 7) + add_imm(0, 0, 35) + ret(),
         "sub": mov_imm(0, 12) + sub_imm(0, 0, 5) + ret(),
         "branch_taken": mov_imm(0, 0) + cbz(0, 2) + mov_imm(0, 99) + mov_imm(0, 1) + ret(),
@@ -150,7 +157,9 @@ def main() -> int:
 
     with open(os.path.join(outdir, "expected.txt"), "w") as f:
         for name, x0 in (("ret42", 42), ("add", 42), ("sub", 7),
-                         ("branch_taken", 1), ("branch_nottaken", 77), ("loop", 5)):
+                         ("branch_taken", 1), ("branch_nottaken", 77), ("loop", 5),
+                         # ServiceSyscall currently returns 0 in X0.
+                         ("syscall", 0)):
             f.write(f"{name} {x0}\n")
     print("wrote expected.txt")
     return 0

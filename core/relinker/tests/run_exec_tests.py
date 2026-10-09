@@ -17,6 +17,7 @@ import argparse
 import os
 import subprocess
 import sys
+import struct
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -112,13 +113,32 @@ def main() -> int:
             failed += 1
             continue
 
-        run = subprocess.run([exe], capture_output=True, text=True)
+        # The runtime needs the guest image mapped at base 0 to recognise
+        # instructions (that is how an SVC is dispatched), so extract .text
+        # from the fixture and hand it over.
+        text_path = os.path.join(probe_dir, f"{name}.text")
+        with open(nro, "rb") as f:
+            hdr = f.read(0x80)
+            text_size = struct.unpack_from("<I", hdr, 0x24)[0]
+            text_path_size = 0x80 + text_size
+            f.seek(0x80)
+            with open(text_path, "wb") as out:
+                out.write(f.read(text_size))
+
+        run = subprocess.run([exe, text_path], capture_output=True, text=True)
         got = run.stdout.strip()
-        if got == f"X0={want}":
-            print(f"PASS {name} -> {got}")
+        ok = got == f"X0={want}"
+        detail = got
+        # A syscall fixture must also reach the host: assert the dispatcher ran.
+        if name == "syscall":
+            if "anyswitch: guest svc #66" not in run.stderr:
+                ok = False
+                detail = f"{got} (syscall never reached the host)"
+        if ok:
+            print(f"PASS {name} -> {detail}")
             passed += 1
         else:
-            print(f"FAIL {name} -> {got!r}, expected X0={want}")
+            print(f"FAIL {name} -> {detail}, expected X0={want}")
             failed += 1
 
     print(f"\n{passed} passed, {failed} failed")

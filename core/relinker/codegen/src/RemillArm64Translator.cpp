@@ -346,7 +346,12 @@ public:
 
             result.CodeOffsets.push_back(pc);
 
-            if (inst.IsIndirectControlFlow()) {
+            // A supervisor call is an async hyper call, not a branch: the guest
+            // carries on at the next instruction, so it must not end the trace.
+            // Only genuinely indirect control flow (BLR/BR) does that.
+            const bool isSyscall =
+                inst.category == remill::Instruction::kCategoryAsyncHyperCall;
+            if (inst.IsIndirectControlFlow() && !isSyscall) {
                 indirectSites.emplace_back(pc, inst.IsFunctionCall());
                 continue; // target unknown statically; ends the trace
             }

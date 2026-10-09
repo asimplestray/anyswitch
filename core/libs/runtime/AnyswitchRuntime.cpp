@@ -75,6 +75,29 @@ namespace {
 constexpr std::size_t kStateGprOffset = 536;
 constexpr std::size_t kGprX0Offset = 8;
 constexpr std::size_t kGprPcOffset = 520;
+
+// ArchState::hyper_call / hyper_call_vector, measured against the same header.
+constexpr std::size_t kHyperCallOffset = 0;
+constexpr std::size_t kHyperCallVectorOffset = 8;
+constexpr std::uint32_t kAArch64SupervisorCall = 12;
+constexpr std::uint32_t kInvalidHyperCall = 0;
+
+void SetX0(State& state, std::uint64_t value) {
+    auto* gpr = reinterpret_cast<std::uint8_t*>(&state) + kStateGprOffset;
+    std::memcpy(gpr + kGprX0Offset, &value, sizeof(value));
+}
+
+// Services one guest syscall, writing results back into the register file the
+// way the console's kernel would. X0 carries the result. The handlers land
+// here as each one is implemented; today every number reports and returns 0,
+// which is enough to prove the seam end to end.
+void ServiceSyscall(State& state, std::uint64_t svc, Memory* mem) {
+    (void)mem;
+    std::fprintf(stderr, "anyswitch: guest svc #%llu\n",
+                 static_cast<unsigned long long>(svc));
+    SetX0(state, 0);
+}
+
 } // namespace
 
 extern "C" {
@@ -106,14 +129,50 @@ Memory* __remill_missing_block(State& state, addr_t addr, Memory* mem) {
 }
 
 Memory* __remill_async_hyper_call(State& state, addr_t ret_addr, Memory* mem) {
-    (void)state;
-    (void)ret_addr;
+    // ArchState::hyper_call is a uint32 at offset 0; hyper_call_vector is a
+    // uint64 at offset 8 holding the SVC immediate (the guest syscall number).
+    auto* base = reinterpret_cast<std::uint8_t*>(&state);
+    const auto name = *reinterpret_cast<const std::uint32_t*>(base);
+    const auto vector = *reinterpret_cast<const std::uint64_t*>(base + 8);
+
+    if (name == kAArch64SupervisorCall) {
+        // Service the guest syscall. The handler writes results back into the
+        // State (X0, X1, ...) exactly as the console's kernel would.
+        ServiceSyscall(state, vector, mem);
+    } else {
+        std::fprintf(stderr, "anyswitch: unhandled hyper_call %u (vector %llu)\n",
+                     name, static_cast<unsigned long long>(vector));
+    }
+
+    // Clear so the block-boundary check does not re-enter.
+    *reinterpret_cast<std::uint32_t*>(base) = kInvalidHyperCall;
     return mem;
 }
 
+// Remill's AArch64 trace lifter has no implementation for SVC: it reports the
+// instruction as an error call carrying the guest PC, then keeps lifting the
+// rest of the trace. That is the seam we service syscalls through, so this
+// reads the instruction at that PC and dispatches when it really is an SVC.
 Memory* __remill_error(State& state, addr_t addr, Memory* mem) {
-    (void)state;
-    (void)addr;
+    // Remill reports an unhandled SVC through this entry point, but it passes
+    // the PC *after* the instruction rather than the instruction's own PC, so
+    // both candidates are checked.
+    if (mem) {
+        for (const addr_t pc : {addr - 4, addr}) {
+            if (pc + 4 > mem->size)
+                continue;
+            std::uint32_t insn = 0;
+            std::memcpy(&insn, mem->data + pc, 4);
+            // SVC #imm : bits 31-24 = 0xD4, immediate in bits 20-5.
+            if ((insn & 0xFF000000u) == 0xD4000000u) {
+                const auto svc = static_cast<std::uint64_t>((insn >> 5) & 0xFFFFu);
+                ServiceSyscall(state, svc, mem);
+                return mem;
+            }
+        }
+    }
+    std::fprintf(stderr, "anyswitch: unlifted instruction at guest 0x%llx\n",
+                 static_cast<unsigned long long>(addr));
     return mem;
 }
 

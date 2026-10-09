@@ -35,12 +35,33 @@ std::uint64_t ReadX0(const void* state) {
 } // namespace
 
 int main(int argc, char** argv) {
+    // The guest image (.text) is mapped at base 0 so the runtime can read
+    // instructions from the PC it is handed - that is how an SVC is
+    // recognised and dispatched. argv[1] optionally overrides the image.
     const std::size_t memSize = 1u << 20; // 1 MiB guest address space
     anyswitch::GuestMemory mem(memSize, 0);
 
+    std::vector<std::uint8_t> image;
+    if (argc > 1) {
+        std::FILE* f = std::fopen(argv[1], "rb");
+        if (f) {
+            std::fseek(f, 0, SEEK_END);
+            const long n = std::ftell(f);
+            std::fseek(f, 0, SEEK_SET);
+            image.resize(static_cast<std::size_t>(n));
+            const std::size_t got = std::fread(image.data(), 1, image.size(), f);
+            image.resize(got);
+            std::fclose(f);
+        }
+    }
+
+    // Map the guest image at base 0 so the runtime can read instructions from
+    // the PCs it is handed; that is how an SVC is recognised and dispatched.
+    if (!image.empty() && !mem.Write(0, image.data(), image.size()))
+        std::fprintf(stderr, "warning: guest image does not fit the address space\n");
+
     // Remill's State is a padded register file; zero it so flags start clean.
-    std::vector<std::uint8_t> stateBytes(1200, 0);
-    stateBytes.resize(1200 + 64, 0); // slack for alignment
+    std::vector<std::uint8_t> stateBytes(1200 + 64, 0);
 
     auto* state = stateBytes.data();
     auto* result = asw_trace_0(state, 0, mem.Handle());
