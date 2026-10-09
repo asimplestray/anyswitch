@@ -2,6 +2,7 @@
 #define ELFPATCHER_GENERAL_IELFPATCHER_HPP
 
 #include <domain/Types.hpp>
+#include <domain/RelinkResult.hpp>
 #include <codegen/IArm64Translator.hpp>
 #include <vector>
 #include <string>
@@ -19,7 +20,8 @@ public:
         const std::string& runPath,
         bool lazyBinding,
         bool dependencyDiagnostics,
-        const std::vector<Codegen::RelocationFixup>& fixups
+        const std::vector<Codegen::RelocationFixup>& fixups,
+        const Relinker::TranslatedCodeInfo& translated
     ) = 0;
 };
 

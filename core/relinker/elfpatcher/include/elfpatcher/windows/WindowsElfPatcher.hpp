@@ -28,7 +28,8 @@ public:
         const std::string& runPath,
         bool lazyBinding,
         bool dependencyDiagnostics,
-        const std::vector<Codegen::RelocationFixup>& fixups
+        const std::vector<Codegen::RelocationFixup>& fixups,
+        const Relinker::TranslatedCodeInfo& translated
     ) override;
 
 private:

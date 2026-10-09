@@ -68,6 +68,12 @@ NroImage NroReader::Parse(const std::vector<std::uint8_t>& bytes) {
     }
     if (image.bssSize > kMaxSegmentSize)
         throw Domain::RelinkerException("NRO .bss too large", image.bssSize);
+
+    // .dynstr/.dynsym extents (relative to .rodata start)
+    image.dynStrOffset = ReadU32Le(bytes, 0x70);
+    image.dynStrSize = ReadU32Le(bytes, 0x74);
+    image.dynSymOffset = ReadU32Le(bytes, 0x78);
+    image.dynSymSize = ReadU32Le(bytes, 0x7C);
     return image;
 }
 

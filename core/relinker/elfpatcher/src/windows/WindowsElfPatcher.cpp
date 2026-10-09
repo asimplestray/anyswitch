@@ -16,7 +16,8 @@ std::vector<std::uint8_t> WindowsPePatcher::Patch(
     const std::string& /*runPath*/,
     bool /*lazyBinding*/,
     bool /*dependencyDiagnostics*/,
-    const std::vector<Codegen::RelocationFixup>& /*fixups*/)
+    const std::vector<Codegen::RelocationFixup>& /*fixups*/,
+    const Relinker::TranslatedCodeInfo& /*translated*/)
 {
     // TODO: Full Windows PE conversion for Switch binaries
     // Steps:

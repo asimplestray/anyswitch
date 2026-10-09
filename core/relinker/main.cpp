@@ -31,12 +31,29 @@ int main(const int argc, char* argv[]) {
         Io::FileWriter fileWriter;
         auto sourceBytes = fileReader.Read(args.inputPath);
 
+                // NSO/NRO dynstr/dynsym extents for symbol resolution
+        std::vector<std::uint8_t> dynStrData, dynSymData;
+        std::uint32_t dynStrSize = 0, dynSymSize = 0;
+        const std::uint8_t* rodataPtr = nullptr;
+        std::uint32_t roDataSize = 0;
+
         if (Relinker::NsoReader::IsNso(sourceBytes)) {
             auto nso = Relinker::NsoReader::Parse(sourceBytes);
             std::cout << "NSO detected: text=" << nso.text.bytes.size()
                       << " rodata=" << nso.rodata.bytes.size()
                       << " data=" << nso.data.bytes.size()
                       << " bss=" << nso.bssSize << "\n";
+            // Extract dynstr/dynsym from rodata
+            if (nso.dynStrSize > 0 && nso.dynStrOffset + nso.dynStrSize <= nso.rodata.bytes.size()) {
+                dynStrData.assign(nso.rodata.bytes.begin() + nso.dynStrOffset,
+                                  nso.rodata.bytes.begin() + nso.dynStrOffset + nso.dynStrSize);
+                dynStrSize = nso.dynStrSize;
+            }
+            if (nso.dynSymSize > 0 && nso.dynSymOffset + nso.dynSymSize <= nso.rodata.bytes.size()) {
+                dynSymData.assign(nso.rodata.bytes.begin() + nso.dynSymOffset,
+                                  nso.rodata.bytes.begin() + nso.dynSymOffset + nso.dynSymSize);
+                dynSymSize = nso.dynSymSize;
+            }
             sourceBytes = Relinker::NsoReader::ConvertToElf(nso);
         } else if (Relinker::NroReader::IsNro(sourceBytes)) {
             auto nro = Relinker::NroReader::Parse(sourceBytes);
@@ -44,6 +61,17 @@ int main(const int argc, char* argv[]) {
                       << " rodata=" << nro.rodata.bytes.size()
                       << " data=" << nro.data.bytes.size()
                       << " bss=" << nro.bssSize << "\n";
+            // Extract dynstr/dynsym from rodata
+            if (nro.dynStrSize > 0 && nro.dynStrOffset + nro.dynStrSize <= nro.rodata.bytes.size()) {
+                dynStrData.assign(nro.rodata.bytes.begin() + nro.dynStrOffset,
+                                  nro.rodata.bytes.begin() + nro.dynStrOffset + nro.dynStrSize);
+                dynStrSize = nro.dynStrSize;
+            }
+            if (nro.dynSymSize > 0 && nro.dynSymOffset + nro.dynSymSize <= nro.rodata.bytes.size()) {
+                dynSymData.assign(nro.rodata.bytes.begin() + nro.dynSymOffset,
+                                  nro.rodata.bytes.begin() + nro.dynSymOffset + nro.dynSymSize);
+                dynSymSize = nro.dynSymSize;
+            }
             sourceBytes = Relinker::NroReader::ConvertToElf(nro);
         }
 
@@ -65,21 +93,11 @@ int main(const int argc, char* argv[]) {
             elfReader, translator, dynBuilder
         );
 
+        // Pass dynstr/dynsym data to pipeline for symbol resolution
+        pipeline->SetDynSymData(std::move(dynStrData), dynStrSize,
+                                std::move(dynSymData), dynSymSize);
+
         auto result = pipeline->Relink(sourceBytes);
-
-        // Apply patches to source
-        for (const auto& patch : result.Patches) {
-            if (patch.Offset > sourceBytes.size())
-                throw Domain::RelinkerException("Patch exceeds source image", patch.Offset);
-            for (std::size_t i = 0; i < patch.Bytes.size() && patch.Offset + i < sourceBytes.size(); ++i)
-                sourceBytes[patch.Offset + i] = patch.Bytes[i];
-        }
-
-        // Replace code section with translated code
-        if (!result.TranslatedCode.empty()) {
-            // In a full impl, the translated code replaces original ARM64 code
-            // and offsets are adjusted
-        }
 
         auto byteWriter = std::make_shared<Io::ByteWriter>();
         std::shared_ptr<Elfpatcher::IElfPatcher> patcher;
@@ -103,7 +121,8 @@ int main(const int argc, char* argv[]) {
             args.runPath,
             args.lazyBinding,
             args.windowsDiagnostics,
-            {}
+            result.Translated.Fixups,
+            result.Translated
         );
 
         const auto absPath = std::filesystem::absolute(args.outputPath).string();

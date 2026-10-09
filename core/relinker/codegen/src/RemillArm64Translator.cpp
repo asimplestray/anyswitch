@@ -249,6 +249,10 @@ public:
         };
         std::set<std::uint64_t> visited;
         std::vector<std::uint64_t> worklist{baseVAddr};
+        // Indirect call/jump sites found while walking (guest addr, is_call).
+        // Collected here so we never re-decode after optimization strips the
+        // intrinsic table the decoder lazily builds.
+        std::vector<std::pair<std::uint64_t, bool>> indirectSites;
 
         while (!worklist.empty() && visited.size() < kMaxInstructions) {
             const auto pc = worklist.back();
@@ -295,6 +299,9 @@ public:
                 result.CodeOffsets.push_back(pc);
             }
 
+            if (inst.IsIndirectControlFlow())
+                indirectSites.emplace_back(pc, inst.IsFunctionCall());
+
             if (inst.IsDirectControlFlow())
                 worklist.push_back(inst.branch_taken_pc);
             const bool uncondJump = inst.IsDirectControlFlow() &&
@@ -322,6 +329,22 @@ public:
 
         std::map<std::string, std::uint64_t> symAddrs;
         result.MachineCode = EmitObject(*mod, symAddrs);
+
+        // Emit fixups for indirect calls/jumps (BLR, BR) — target unknown statically.
+        // Sites were collected during the walk because re-decoding after the
+        // optimizer would touch freed intrinsics.
+        for (const auto& [guestAddr, isCall] : indirectSites) {
+            const auto it = symAddrs.find(LiftedName(guestAddr));
+            if (it == symAddrs.end())
+                continue; // instruction failed to lift
+            result.Fixups.push_back({
+                it->second,
+                0,
+                isCall ? 0x1u : 0x2u, // 1=call, 2=jump
+                true,                // relative
+                false                // not PLT
+            });
+        }
 
         // Debug aid (env-gated, never in default output):
         //   ANYSWITCH_DUMP_LIFTED=sym -> print symbol table

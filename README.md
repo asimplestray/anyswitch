@@ -84,9 +84,12 @@ Without LLVM/Remill the project still configures and builds; codegen is disabled
 - [x] NRO0 loader (homebrew) validated on real Checkpoint.nro (5 MB)
 - [x] ARM64→x86-64 lifting via Remill+LLVM (recursive descent, O2,
   object extract; Checkpoint.nro: 110,768 instrs → 6.8 MB x86-64 in ~70 s)
-- [ ] Splice translated x86-64 code back into the output ELF (`core/relinker/main.cpp`)
-- [ ] Coverage: indirect-call targets, MRS/MSR of Switch system registers
-- [ ] Parse NRO/NSO `.dynstr`/`.dynsym` extents instead of empty dynamic
+- [x] Splice translated code into the output ELF (patcher admits the code
+  blob as an extra LOAD segment and retargets the entry stub to it)
+- [x] Parse NSO/NRO `.dynstr`/`.dynsym` to resolve import names
+- [x] Indirect-call fixups (BLR/BR) recorded and emitted as trampolines
+- [ ] Dispatch trampolines through PLT/GOT instead of direct stubs
+- [ ] Link-time symbol resolution for real dynamic linking
 - [ ] Windows PE backend (`WindowsElfPatcher.cpp` stub)
 - [ ] Maxwell decoder → IR → SPIR-V stages (`core/shader/recompiler/`)
 - [ ] Expand `libnx`/`libkernel` coverage with integration tests

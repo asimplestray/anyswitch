@@ -22,9 +22,20 @@ void LinuxElfPatcher::_appendDynEntry(std::vector<std::uint8_t>& buf, std::int64
     _byteWriter->AppendU64(buf, val);
 }
 
-void LinuxElfPatcher::_appendTrampoline(std::vector<std::uint8_t>& /*buf*/, const Codegen::RelocationFixup& /*fixup*/) {
-    // Trampolines for long jumps when translated code is too far from originals
-    // Implementation will handle x86-64 rel32 range checks
+void LinuxElfPatcher::_appendTrampoline(std::vector<std::uint8_t>& buf, const Codegen::RelocationFixup& fixup) {
+    // x86-64 trampoline for indirect calls/jumps:
+    //   movabs rax, <target_addr>  ; 48 B8 <8 bytes>
+    //   jmp rax                     ; FF E0
+    // This preserves the target address for later relocation
+    std::vector<std::uint8_t> trampoline;
+    trampoline.push_back(0x48); // REX.W
+    trampoline.push_back(0xB8); // mov rax, imm64
+    for (int i = 0; i < 8; ++i)
+        trampoline.push_back(static_cast<std::uint8_t>((fixup.Addend >> (i * 8)) & 0xFF));
+    trampoline.push_back(0xFF); // jmp rax
+    trampoline.push_back(0xE0);
+    // Append trampoline at current position
+    for (std::uint8_t b : trampoline) buf.push_back(b);
 }
 
 std::vector<std::uint8_t> LinuxElfPatcher::Patch(
@@ -35,7 +46,8 @@ std::vector<std::uint8_t> LinuxElfPatcher::Patch(
     const std::string& runPath,
     bool lazyBinding,
     bool dependencyDiagnostics,
-    const std::vector<Codegen::RelocationFixup>& /*fixups*/)
+    const std::vector<Codegen::RelocationFixup>& fixups,
+    const Relinker::TranslatedCodeInfo& translated)
 {
     if (dependencyDiagnostics) {
         // Linux target doesn't support dependency diagnostics
@@ -54,8 +66,21 @@ std::vector<std::uint8_t> LinuxElfPatcher::Patch(
     _byteWriter->WriteU16(buf, kEhdrShNumOffset, 0);
     _byteWriter->WriteU16(buf, kEhdrShStrNdxOffset, 0);
 
-    // Build extra block: dynstr, dynsym, rela, jmprel, dynamic segment, entry stub, interp
+    // Build extra block: translated code, dynstr, dynsym, rela, jmprel, dynamic segment, entry stub, interp
     const auto extraBlockOff = static_cast<std::uint64_t>(buf.size());
+
+    // Translated x86-64 code (placed first in extra block)
+    std::uint64_t translatedCodeOff = buf.size();
+    if (!translated.Code.empty()) {
+        // Align to 16 bytes for code
+        while (buf.size() % 16) buf.push_back(0);
+        translatedCodeOff = buf.size();
+        for (std::uint8_t b : translated.Code) buf.push_back(b);
+        // Align after code
+        while (buf.size() % 16) buf.push_back(0);
+    }
+
+    // dynstr, dynsym, rela, jmprel, dynamic segment, entry stub, interp follow
 
     // .dynstr
     std::uint64_t dynStrOff = buf.size();
@@ -90,6 +115,11 @@ std::vector<std::uint8_t> LinuxElfPatcher::Patch(
         return extraBlockVaddr + (fileOffset - extraBlockOff);
     };
 
+    // Translated code VADDR (first thing in extra block after any alignment)
+    const std::uint64_t translatedCodeVaddr = (!translated.Code.empty())
+        ? vaddrOf(translatedCodeOff)
+        : 0;
+
     // Build .dynamic segment
     std::vector<std::uint8_t> dynSegBuf;
     for (std::uint8_t b : dynSection.DynamicSegmentData) dynSegBuf.push_back(b);
@@ -117,12 +147,18 @@ std::vector<std::uint8_t> LinuxElfPatcher::Patch(
     for (std::uint8_t b : dynSegBuf) buf.push_back(b);
 
     // Entry stub
-    std::uint64_t realEntryVaddr = *reinterpret_cast<const std::uint64_t*>(buf.data() + kEhdrEntryOffset);
+    std::uint64_t entryVaddr = (!translated.Code.empty()) ? translatedCodeVaddr
+        : *reinterpret_cast<const std::uint64_t*>(buf.data() + kEhdrEntryOffset);
     std::uint64_t stubOff = buf.size();
     std::uint64_t stubVaddr = vaddrOf(stubOff);
-    auto stubBytes = _entryStubBuilder->BuildEntryStub(stubVaddr, realEntryVaddr);
+    auto stubBytes = _entryStubBuilder->BuildEntryStub(stubVaddr, entryVaddr);
     for (std::uint8_t b : stubBytes) buf.push_back(b);
     _byteWriter->WriteU64(buf, kEhdrEntryOffset, stubVaddr);
+
+    // Trampolines for indirect calls/jumps
+    for (const auto& fixup : fixups) {
+        _appendTrampoline(buf, fixup);
+    }
 
     // Interpreter
     static constexpr char kInterp[] = "/lib64/ld-linux-x86-64.so.2";
@@ -131,9 +167,14 @@ std::vector<std::uint8_t> LinuxElfPatcher::Patch(
 
     std::uint64_t extraBlockSize = buf.size() - extraBlockOff;
 
+    // Move program header table to end of file to avoid overwriting original segments
+    // when adding extra LOAD segments
+    while (buf.size() % 8) buf.push_back(0);
+    const std::uint64_t finalPhOff = buf.size();
+
     // Program header layout
     ProgramHeaderLayoutRequest layoutReq{};
-    layoutReq.PhOff = *reinterpret_cast<const std::uint64_t*>(buf.data() + kEhdrPhOffOffset);
+    layoutReq.PhOff = finalPhOff;
     layoutReq.PhEntSize = *reinterpret_cast<const std::uint16_t*>(buf.data() + kEhdrPhEntSizeOffset);
     layoutReq.PhNum = *reinterpret_cast<const std::uint16_t*>(buf.data() + kEhdrPhNumOffset);
     layoutReq.OriginalHeaders = originalHeaders;
@@ -147,6 +188,11 @@ std::vector<std::uint8_t> LinuxElfPatcher::Patch(
 
     std::uint16_t writtenPh = _programHeaderLayoutBuilder->WriteLayout(buf, layoutReq);
     _byteWriter->WriteU16(buf, kEhdrPhNumOffset, writtenPh);
+    _byteWriter->WriteU64(buf, kEhdrPhOffOffset, finalPhOff);
+
+    // Zero out old program header table area to avoid confusion
+    // (original phdr table at offset 0x40 is now unused)
+    // Note: we don't actually zero it to keep the file smaller, but we could
 
     // Section headers
     SectionHeaderTableRequest sectionReq{};

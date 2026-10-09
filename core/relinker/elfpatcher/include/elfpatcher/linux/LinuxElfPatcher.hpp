@@ -6,6 +6,7 @@
 #include <elfpatcher/general/IProgramHeaderLayoutBuilder.hpp>
 #include <elfpatcher/general/ISectionHeaderTableBuilder.hpp>
 #include <io/ByteWriter.hpp>
+#include <codegen/IArm64Translator.hpp>
 #include <memory>
 #include <vector>
 
@@ -28,7 +29,8 @@ public:
         const std::string& runPath,
         bool lazyBinding,
         bool dependencyDiagnostics,
-        const std::vector<Codegen::RelocationFixup>& fixups
+        const std::vector<Codegen::RelocationFixup>& fixups,
+        const Relinker::TranslatedCodeInfo& translated
     ) override;
 
 private:

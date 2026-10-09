@@ -41,9 +41,19 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
     if (!hasDynamic) throw Domain::RelinkerException("No PT_DYNAMIC segment");
 
     // 3. Extract relocations and needed libraries
+    // Use NSO/NRO dynstr/dynsym extents if available (passed via sourceElf metadata)
     std::vector<Domain::Relocation> relocations;
     std::vector<std::string> neededLibraries;
-    _extractRelocations(dynTags, relocations, neededLibraries);
+    _extractRelocations(dynTags, relocations, neededLibraries,
+                       _dynStrData.data(), _dynStrSize,
+                       _dynSymData.data(), _dynSymSize);
+
+    // Store resolved names for reporting
+    for (const auto& rel : relocations) {
+        if (!rel.ImportName.empty()) {
+            _currentResult.RegistryEntries.push_back(rel.ImportName);
+        }
+    }
 
     // 4. Translate ARM64 code to x86-64
     for (const auto& ph : codeSegments) {
@@ -60,9 +70,13 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
             auto translated = _translator->Translate(
                 arm64Code, ph.MappedAddress, relocRefs
             );
-            // Store translated code
-            _currentResult.TranslatedCode = translated.MachineCode;
-            _currentResult.CodeInfo = translated.CodeOffsets;
+            // Store translated code in the new TranslatedCodeInfo structure
+            _currentResult.Translated.Code = std::move(translated.MachineCode);
+            _currentResult.Translated.GuestAddresses = std::move(translated.CodeOffsets);
+            _currentResult.Translated.Fixups = std::move(translated.Fixups);
+            // First executable segment's base address is the entry point for translated code
+            if (_currentResult.Translated.EntryGuestAddr == 0)
+                _currentResult.Translated.EntryGuestAddr = ph.MappedAddress;
         }
     }
 
@@ -76,11 +90,13 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
     result.OriginalHeaders = programHeaders;
     result.DynamicSection = std::move(dynSection);
     result.OriginalPltGotVaddr = 0;
-    result.TranslatedCode = std::move(_currentResult.TranslatedCode);
-    result.CodeInfo = std::move(_currentResult.CodeInfo);
+    // Move Translated first, then copy to old fields for compatibility
+    result.Translated = std::move(_currentResult.Translated);
+    result.TranslatedCode = result.Translated.Code;
+    result.CodeInfo = result.Translated.GuestAddresses;
 
     std::cout << "Dynamic symbol references: " << relocations.size() << "\n";
-    std::cout << "Translated code: " << result.TranslatedCode.size() << " bytes\n";
+    std::cout << "Translated code: " << result.Translated.Code.size() << " bytes\n";
 
     return result;
 }
@@ -88,7 +104,11 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
 void RelinkerPipeline::_extractRelocations(
     const std::vector<Domain::DynamicTag>& tags,
     std::vector<Domain::Relocation>& relocations,
-    std::vector<std::string>& neededLibraries
+    std::vector<std::string>& neededLibraries,
+    const std::uint8_t* dynStr,
+    std::uint32_t dynStrSize,
+    const std::uint8_t* dynSym,
+    std::uint32_t dynSymSize
 ) {
     constexpr std::int64_t DT_RELA = 7;
     constexpr std::int64_t DT_RELASZ = 8;
@@ -130,6 +150,24 @@ void RelinkerPipeline::_extractRelocations(
         }
     }
 
+    // Helper: read symbol name from dynstr via dynsym entry
+    auto resolveSymbolName = [&](std::int32_t symIdx) -> std::string {
+        if (!dynStr || !dynStrSize || !dynSym || !dynSymSize || symIdx < 0)
+            return {};
+        constexpr std::size_t SYM_ENT_SIZE = 24;
+        const std::uint64_t symOff = static_cast<std::uint64_t>(symIdx) * SYM_ENT_SIZE;
+        if (symOff + SYM_ENT_SIZE > dynSymSize)
+            return {};
+        std::uint32_t stName = 0;
+        std::memcpy(&stName, dynSym + symOff, 4);
+        if (stName >= dynStrSize)
+            return {};
+        std::string name;
+        for (std::uint32_t i = stName; i < dynStrSize && dynStr[i]; ++i)
+            name.push_back(static_cast<char>(dynStr[i]));
+        return name;
+    };
+
     // Parse RELA entries (each is 24 bytes for AArch64)
     constexpr std::size_t RELA_ENT_SIZE = 24;
     auto parseRela = [&](Domain::FileByteOffset offset, Domain::ByteCount size) {
@@ -145,7 +183,7 @@ void RelinkerPipeline::_extractRelocations(
             std::memcpy(&rel.Addend, raw.data() + pos + 16, 8);
             rel.Type = static_cast<std::uint32_t>(rInfo & 0xFFFFFFFF);
             rel.SymbolIndex = static_cast<std::int32_t>(rInfo >> 32);
-            rel.ImportName = ""; // resolved from dynsym
+            rel.ImportName = resolveSymbolName(rel.SymbolIndex);
             relocations.push_back(rel);
         }
     };

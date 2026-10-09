@@ -33,6 +33,11 @@ struct NroImage {
     NroSegment rodata;
     NroSegment data;
     std::uint32_t bssSize = 0;
+    // .dynstr/.dynsym extents (relative to .rodata start, 0 if absent)
+    std::uint32_t dynStrOffset = 0;
+    std::uint32_t dynStrSize = 0;
+    std::uint32_t dynSymOffset = 0;
+    std::uint32_t dynSymSize = 0;
 };
 
 class NroReader {

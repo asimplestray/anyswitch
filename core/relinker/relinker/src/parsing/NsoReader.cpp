@@ -143,6 +143,12 @@ NsoImage NsoReader::Parse(const std::vector<std::uint8_t>& bytes) {
     image.bssSize = ReadU32Le(bytes, 0x3C);
     if (image.bssSize > kMaxSegmentSize)
         throw Domain::RelinkerException("NSO .bss too large", image.bssSize);
+
+    // .dynstr/.dynsym extents (relative to .rodata start)
+    image.dynStrOffset = ReadU32Le(bytes, 0x90);
+    image.dynStrSize = ReadU32Le(bytes, 0x94);
+    image.dynSymOffset = ReadU32Le(bytes, 0x98);
+    image.dynSymSize = ReadU32Le(bytes, 0x9C);
     return image;
 }
 
