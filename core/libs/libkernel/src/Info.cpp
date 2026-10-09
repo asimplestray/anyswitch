@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstdlib>
 #include <cstring>
 
 namespace libkernel {
@@ -22,29 +23,60 @@ bool WriteU64(Memory& mem, std::uint64_t addr, std::uint64_t value) {
 
 } // namespace
 
+namespace {
+
+std::uint64_t InfoValue(std::uint32_t type) {
+    // Handle 0 is invalid on the console, so libnx stores the main-thread
+    // handle it is handed here and uses it for every subsequent thread
+    // operation. Returning 0 made those calls fail deep inside init.
+    constexpr std::uint64_t kMainThreadHandle = 0xFFFF8001ull;
+
+    switch (type) {
+        case 0:  // AllowedCpuIdBitmask
+        case 1:  // AllowedThreadPrioBitmask
+            return 0xFFFFFFFFFFFFFFFFull;
+        case 2:  // AliasRegionAddress
+        case 3:  // AliasRegionSize
+            return 0;
+        case 4:  // HeapRegionAddress
+            return HeapRegionAddress();
+        case 5:  // HeapRegionSize
+            return HeapRegionSize();
+        case 6:  // TotalMemoryAvailable
+            return 0x10000000ull;
+        case 7:  // TotalMemoryUsage
+            return 0x10000ull;
+        case 8:  // UsedMemorySize
+            return 0;
+        case 9:  // InitialProgramId
+            return 1;
+        case 10: // InitialMainThreadStackSize
+            return 0x100000ull;
+        case 11: // SystemResourceSize
+            return 0x2000000ull;
+        case 12: // InitialMainThreadHandle
+            return kMainThreadHandle;
+        case 13: // InitialMainThreadPriority
+            return 0x2Cull;
+        case 14: // InitialMainThreadCoreNum
+            return 0;
+        default:
+            return 0;
+    }
+}
+
+} // namespace
+
 // svcGetInfo(uint64_t* out, InfoType type, Handle handle, uint64_t subtype)
 //          -> result, info in X1.
 void SvGetInfo(SyscallArgs& args, Memory& mem) {
     const auto type = static_cast<std::uint32_t>(args.x[1]);
-    std::uint64_t value = 0;
-    switch (type) {
-        case 0:  // AllowedCpuIdBitmask
-        case 1:  // AllowedThreadPrioBitmask
-            value = 0xFFFFFFFFFFFFFFFFull;
-            break;
-        case 4:  // HeapRegionAddress
-        case 5:  // HeapRegionSize
-            value = (type == 4) ? HeapRegionAddress() : HeapRegionSize();
-            break;
-        case 6:  // TotalMemoryAvailable
-            value = 0x10000000ull;
-            break;
-        case 10: // InitialMainThreadStackSize
-            value = 0x100000ull;
-            break;
-        default:
-            break;
-    }
+    if (std::getenv("ANYSWITCH_TRACE_GETINFO"))
+        std::fprintf(stderr, "  GetInfo type=%u handle=%llu subtype=%llu -> %llu\n",
+                     type, static_cast<unsigned long long>(args.x[2]),
+                     static_cast<unsigned long long>(args.x[3]),
+                     static_cast<unsigned long long>(InfoValue(type)));
+    const auto value = InfoValue(type);
     WriteU64(mem, args.x[0], value);
     args.x[0] = kResultSuccess;
     args.x[1] = value;

@@ -68,10 +68,24 @@ int main(int argc, char** argv) {
     else
         libkernel::SetLoadedImageBytes(image.size());
 
+    // The kernel hands a thread its TLS block through TPIDR_EL0. Both of the
+    // homebrew binaries read it on every TLS access (68 and 47 MRS sites
+    // respectively), so leaving it zero means every derived pointer is null.
+    // Point it at a zeroed area of the guest mapping that the heap does not
+    // overlap.
+    constexpr std::uint64_t kTcbAddress = 0x8000000ull; // 128 MiB
+    constexpr std::size_t kStateTpidrEl0Offset = 1112;
+
     // Remill's State is a padded register file; zero it so flags start clean.
     std::vector<std::uint8_t> stateBytes(1200 + 64, 0);
 
     auto* state = stateBytes.data();
+    if (!mem.Write(kTcbAddress, stateBytes.data(), 1)) {
+        // Just touching one byte is enough to confirm the address is mapped.
+        std::fprintf(stderr, "warning: TLS address is not mapped\n");
+    }
+    std::memcpy(state + kStateTpidrEl0Offset, &kTcbAddress, sizeof(kTcbAddress));
+
     auto* result = asw_trace_0(state, 0, mem.Handle());
 
     std::printf("X0=%llu\n", static_cast<unsigned long long>(ReadX0(state)));
