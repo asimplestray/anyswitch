@@ -1,0 +1,64 @@
+# Build output
+build/
+build-*/
+cmake-build-*/
+3rdparty_build/
+out/
+install/
+
+# CMake / Ninja / CTest artifacts
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/Temporary/
+LastTest.log
+compile_commands.json
+.ninja_*
+
+# Compiled objects
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.prx
+*.elf
+*.nso
+
+# IDE / editor
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+.clangd/
+.cache/
+
+# Local agent / AI state (not for contributors)
+.kilo/
+.opencode/
+kilocode.*
+
+# Python helpers
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Keys, firmware, game dumps — never commit these
+*.nsp
+*.xci
+keys.txt
+prod.keys
+title.keys
+game_dump/
+romfs/
+exefs/
+kilo.json

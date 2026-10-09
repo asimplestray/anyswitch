@@ -1,0 +1,15 @@
+name: Good first issue
+description: Small, well-scoped starter task (maintainers only)
+labels: ["good first issue"]
+body:
+  - type: textarea
+    id: task
+    attributes:
+      label: Task
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Definition of done
+      placeholder: Files touched, tests added, docs updated.

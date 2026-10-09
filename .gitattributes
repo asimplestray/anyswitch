@@ -1,0 +1,8 @@
+# C/C++ binary artifacts
+*.o
+*.a
+*.so
+*.prx
+
+# Linguist: treat PRX outputs as binary
+*.prx binary

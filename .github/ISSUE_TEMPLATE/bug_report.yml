@@ -1,0 +1,43 @@
+name: Bug report
+description: Report a reproducible build or conversion problem
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please use synthetic fixtures only — no games, keys, or firmware.
+  - type: input
+    id: commit
+    attributes:
+      label: Commit / branch tested
+      placeholder: main @ abc1234
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Commands run, starting from a clean `build/` directory.
+      placeholder: |
+        cmake -S . -B build -G Ninja -DBUILD_TESTING=ON
+        cmake --build build --parallel
+        ctest --test-dir build --output-on-failure
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      placeholder: |
+        OS:
+        Compiler:
+        CMake:
+        LLVM/Remill (if any):
+    validations:
+      required: true
