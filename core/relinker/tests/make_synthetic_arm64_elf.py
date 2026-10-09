@@ -18,7 +18,7 @@ PT_DYNAMIC = 2
 PF_X, PF_W, PF_R = 1, 2, 4
 
 # ret; nop; nop; nop (valid AArch64, safe for future translator stages)
-DEFAULT_TEXT = bytes.fromhex("c0035fd51f2003d51f2003d51f2003d5")
+DEFAULT_TEXT = bytes.fromhex("c0035fd61f2003d51f2003d51f2003d5")
 DEFAULT_RODATA = b"ANYSWITCH_FIXTURE_v1\x00"
 DEFAULT_DATA = bytes.fromhex("efbeadde78563412")
 

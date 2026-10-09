@@ -105,6 +105,22 @@ def main() -> int:
     assert "FAIL" in proc.stderr, "expected FAIL diagnostics on stderr"
     print("PASS truncated NSO rejected")
 
+    # 7. Real translation when Remill+LLVM are available; otherwise the
+    # --to-intel flag fails fast with a clear message (skip, don't fail).
+    elf_in = os.path.join(workdir, "intel.elf")
+    with open(elf_in, "wb") as f:
+        f.write(build_elf(DEFAULT_TEXT, DEFAULT_RODATA, DEFAULT_DATA))
+    proc = subprocess.run([args.relinker, "--to-intel", elf_in,
+                           elf_in + ".out.elf"],
+                          capture_output=True, text=True)
+    if proc.returncode != 0 and "LLVM/Remill" in proc.stderr:
+        print("SKIP --to-intel (Remill/LLVM not built)")
+    else:
+        assert proc.returncode == 0, f"--to-intel failed:\n{proc.stderr}"
+        assert "Translated code: 0 bytes" not in proc.stdout, \
+            "expected nonzero translation"
+        print("PASS --to-intel translation")
+
     print(f"ALL E2E TESTS PASSED ({workdir})")
     return 0
 

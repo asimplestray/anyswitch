@@ -82,7 +82,11 @@ Without LLVM/Remill the project still configures and builds; codegen is disabled
 
 - [x] NSO0 loader (uncompressed + LZ4) with synthetic ELF/NSO e2e fixtures
 - [x] NRO0 loader (homebrew) validated on real Checkpoint.nro (5 MB)
+- [x] ARM64→x86-64 lifting via Remill+LLVM (per-instruction functions, O2,
+  object extract; verified by disassembly, ~120 B/instr, ~0.7 ms/instr)
 - [ ] Splice translated x86-64 code back into the output ELF (`core/relinker/main.cpp`)
+- [ ] Scale validation on real multi-MB binaries + CFG-aware lifting (branches)
+- [ ] Parse NRO/NSO `.dynstr`/`.dynsym` extents instead of empty dynamic
 - [ ] Windows PE backend (`WindowsElfPatcher.cpp` stub)
 - [ ] Maxwell decoder → IR → SPIR-V stages (`core/shader/recompiler/`)
 - [ ] Expand `libnx`/`libkernel` coverage with integration tests

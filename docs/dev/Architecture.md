@@ -19,15 +19,22 @@ The main executable that converts a decrypted Switch NSO/ELF binary into a host-
 
 ### 2. Binary Translation (codegen)
 
-**ARM64 → x86-64 via Remill + LLVM:**
+**ARM64 → x86-64 via Remill + LLVM** (`RemillArm64Translator.cpp`, needs
+the `3rdparty/README.md` Remill build):
+
 ```
-ARM64 instructions → [Remill Decoder] → LLVM IR → [LLVM Passes] → x86-64 machine code
+ARM64 bytes → [Remill decode] → per-instruction LLVM functions
+  → link aarch64.bc semantics → internalize + GlobalDCE + O2
+  → x86-64 object → extract .text (+ per-function guest addresses)
 ```
 
-- Remill decodes ARM64 instructions and lifts them to LLVM IR
-- LLVM's x86-64 backend handles register allocation (32 ARM GPRs → 16 x86 GPRs)
-- LLVM optimization passes handle instruction combining, dead code elimination, etc.
-- Supports both static binary translation (whole function) and per-block translation
+- Each guest instruction becomes one `asw_lifted_<addr>(State*, pc, Memory*)`
+  function; dead semantics are dropped via `llvm.compiler.used` removal,
+  internalization, and GlobalDCE (~120 B/instr on `ret`/`nop` samples).
+- Requires `ANYSWITCH_HAS_REMILL` (auto-detected local build tree or system
+  install); without it the pipeline still runs with codegen disabled.
+- Alpha limits: no CFG recovery or branch resolution, relocations recorded
+  but not applied, translated bytes not yet spliced into the output ELF.
 
 ### 3. System Libraries (core/libs/prx)
 

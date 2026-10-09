@@ -37,21 +37,58 @@ target_include_directories(relinker PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../libs
 )
 
-# Remill integration (conditional on LLVM + Remill availability).
-# Root CMake sets ANYSWITCH_HAS_LLVM only when both are present.
-if(ANYSWITCH_HAS_LLVM)
+# Remill integration (translation enabled only when LLVM + Remill resolve).
+if(ANYSWITCH_HAS_REMILL)
+    find_package(Threads REQUIRED)
     target_sources(relinker PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/RemillArm64Translator.cpp
     )
     target_compile_definitions(relinker PRIVATE
-        ANYSWITCH_HAS_LLVM
         ANYSWITCH_HAS_REMILL
+        ANYSWITCH_HAS_LLVM
     )
-    if(DEFINED LLVM_LIBRARY_DIR)
-        target_link_directories(relinker PRIVATE ${LLVM_LIBRARY_DIR})
-    endif()
-    if(TARGET remill)
-        target_link_libraries(relinker PRIVATE remill)
+
+    # Arch/LLVM dylib builds ship a single libLLVM.so instead of per-component
+    # archives; link it directly.
+    set(_anyswitch_llvm_libs LLVM)
+
+    if(remill_FOUND)
+        target_link_libraries(relinker PRIVATE remill ${_anyswitch_llvm_libs})
+    elseif(DEFINED ANYSWITCH_REMILL_BUILD_DIR)
+        # Locally built Remill tree (see 3rdparty/README.md): link the
+        # static archives directly, grouped to resolve cycles.
+        target_include_directories(relinker PRIVATE
+            ${CMAKE_SOURCE_DIR}/3rdparty/remill/include
+            ${ANYSWITCH_REMILL_DEPS_DIR}/include
+            ${LLVM_INCLUDE_DIRS}
+        )
+        target_compile_definitions(relinker PRIVATE
+            "ANYSWITCH_REMILL_AARCH64_BC=\"${ANYSWITCH_REMILL_BUILD_DIR}/lib/Arch/AArch64/Runtime/aarch64.bc\""
+        )
+        target_link_libraries(relinker PRIVATE
+            -Wl,--start-group
+            ${ANYSWITCH_REMILL_BUILD_DIR}/lib/Version/libremill_version.a
+            ${ANYSWITCH_REMILL_BUILD_DIR}/lib/OS/libremill_os.a
+            ${ANYSWITCH_REMILL_BUILD_DIR}/lib/Arch/AArch64/libremill_arch_aarch64.a
+            ${ANYSWITCH_REMILL_BUILD_DIR}/lib/Arch/X86/libremill_arch_x86.a
+            ${ANYSWITCH_REMILL_BUILD_DIR}/lib/Arch/Sleigh/libremill_arch_sleigh.a
+            ${ANYSWITCH_REMILL_BUILD_DIR}/lib/Arch/SPARC32/libremill_arch_sparc32.a
+            ${ANYSWITCH_REMILL_BUILD_DIR}/lib/Arch/SPARC64/libremill_arch_sparc64.a
+            ${ANYSWITCH_REMILL_BUILD_DIR}/lib/Arch/libremill_arch.a
+            ${ANYSWITCH_REMILL_BUILD_DIR}/lib/BC/libremill_bc.a
+            ${ANYSWITCH_REMILL_BUILD_DIR}/_deps/sleigh-build/libsla.a
+            ${ANYSWITCH_REMILL_BUILD_DIR}/_deps/sleigh-build/libdecomp.a
+            ${ANYSWITCH_REMILL_BUILD_DIR}/_deps/sleigh-build/support/libslaSupport.a
+            ${ANYSWITCH_REMILL_DEPS_DIR}/lib/libxed.a
+            ${ANYSWITCH_REMILL_DEPS_DIR}/lib/libxed-ild.a
+            ${ANYSWITCH_REMILL_DEPS_DIR}/lib/libglog.a
+            ${ANYSWITCH_REMILL_DEPS_DIR}/lib/libgflags.a
+            -Wl,--end-group
+            ${_anyswitch_llvm_libs}
+            ${CMAKE_DL_LIBS}
+            unwind
+            Threads::Threads
+        )
     endif()
 endif()
 
