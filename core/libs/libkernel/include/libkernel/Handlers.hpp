@@ -39,7 +39,21 @@ void SvGetThreadId(SyscallArgs& args, Memory& mem);
 void SvGetSystemTick(SyscallArgs& args, Memory& mem);
 void SvOutputDebugString(SyscallArgs& args, Memory& mem);
 void SvBreak(SyscallArgs& args, Memory& mem);
+void SvConnectToNamedPort(SyscallArgs& args, Memory& mem);
+void SvConnectToPort(SyscallArgs& args, Memory& mem);
+void SvSendSyncRequestLight(SyscallArgs& args, Memory& mem);
+void SvSendSyncRequest(SyscallArgs& args, Memory& mem);
+void SvSendSyncRequestWithUserBuffer(SyscallArgs& args, Memory& mem);
+void SvSendAsyncRequestWithUserBuffer(SyscallArgs& args, Memory& mem);
+void SvCreateSession(SyscallArgs& args, Memory& mem);
+void SvAcceptSession(SyscallArgs& args, Memory& mem);
+void SvCreatePort(SyscallArgs& args, Memory& mem);
+void SvManageNamedPort(SyscallArgs& args, Memory& mem);
+void SvReplyAndReceive(SyscallArgs& args, Memory& mem);
+void SvReplyAndReceiveLight(SyscallArgs& args, Memory& mem);
+
 void SvExitProcess(SyscallArgs& args, Memory& mem);
 void SvCallSecureMonitor(SyscallArgs& args, Memory& mem);
+void ResetHandleSpace();
 
 } // namespace libkernel

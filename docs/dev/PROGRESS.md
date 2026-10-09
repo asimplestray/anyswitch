@@ -19,7 +19,15 @@ here and a homebrew that produces visible output.
 curl -LO https://github.com/bward-dev1/rainbow-nro/releases/download/rainbow-v1/rainbow.nro
 ```
 
-## What that run showed
+## Where the wall is now
+
+The remaining failure is control reaching zero-word regions inside `.text`
+(0x48cc and friends), which means the guest is branching into data. That is
+consistent with indirect-call targets never being resolved: the relinker
+records each BLR/BR site and emits a fixup, but the fixup's target is still
+zero. Making those resolve is the next blocker.
+
+## What the earlier run showed
 
 Running it prints the syscalls it issues, in order:
 
@@ -38,7 +46,20 @@ Two kinds of gap appear alongside that:
    99.9% coverage of what discovery reached. These are forms Remill's AArch64
    semantics do not implement (`MRS`/`MSR` of system registers, some SIMD
    loads/stores) plus data that a straight-line scan read as code.
-2. **Syscalls were stubs.** Now implemented against the SwitchBrew table:
+2. **The runtime only ran one basic block.** A lifted trace is one block: it
+   runs, updates the guest's PC, and returns. Nothing read that PC back and ran
+   the next trace, so "it executes" previously meant exactly one block. The
+   runtime now has a driver that chains them, fed by a trace table the
+   relinker emits (ANYSWITCH_EMIT_TRACES). Two homebrew binaries now run
+   thousands of traces instead of one.
+
+3. **Every TLS access failed.** Remill's AArch64 semantics do not implement
+   `MRS`/`MSR`, and TPIDRRO_EL0 is how both binaries reach their thread-local
+   storage - 172 and 188 sites respectively. The runtime now decodes and
+   performs these moves (TPIDRRO_EL0, TPIDR_EL0, CNTPCT_EL0, MIDR_EL1), which
+   removed the most frequent failure in the whole run.
+
+4. **Syscalls were stubs.** Now implemented against the SwitchBrew table:
    30+ handlers, arguments read from the guest's X0-X5, results written back. A
    heap is allocated inside the guest address space rather than at a fabricated
    base (returning a base outside the mapping made every allocation silently

@@ -53,6 +53,20 @@ const Entry kTable[] = {
     {0x2A, nullptr, "FlushEntireDataCache"},
     {0x2B, SvSetMemoryAttribute, "FlushDataCache"},
     {0x7F, SvCallSecureMonitor, "CallSecureMonitor"},
+
+    // --- Sessions and ports (IPC) ------------------------------------------
+    {0x1F, SvConnectToNamedPort, "ConnectToNamedPort"},
+    {0x20, SvSendSyncRequestLight, "SendSyncRequestLight"},
+    {0x21, SvSendSyncRequest, "SendSyncRequest"},
+    {0x22, SvSendSyncRequestWithUserBuffer, "SendSyncRequestWithUserBuffer"},
+    {0x23, SvSendAsyncRequestWithUserBuffer, "SendAsyncRequestWithUserBuffer"},
+    {0x40, SvCreateSession, "CreateSession"},
+    {0x41, SvAcceptSession, "AcceptSession"},
+    {0x42, SvReplyAndReceiveLight, "ReplyAndReceiveLight"},
+    {0x43, SvReplyAndReceive, "ReplyAndReceive"},
+    {0x70, SvCreatePort, "CreatePort"},
+    {0x71, SvManageNamedPort, "ManageNamedPort"},
+    {0x72, SvConnectToPort, "ConnectToPort"},
 };
 
 } // namespace

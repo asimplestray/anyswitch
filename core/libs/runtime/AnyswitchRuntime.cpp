@@ -2,6 +2,8 @@
 
 #include "remill/Arch/AArch64/Runtime/State.h"
 #include "Syscalls.hpp"
+
+#include "libkernel/SystemRegisters.hpp"
 #include "remill/Arch/Runtime/HyperCall.h"
 #include "remill/Arch/Runtime/Intrinsics.h"
 
@@ -116,6 +118,8 @@ extern "C" double __remill_undefined_f64() { return 0.0; }
 // Register/PC offsets, measured against remill/Arch/AArch64/Runtime/State.h:
 //   offsetof(AArch64State, gpr) = 536, GPR.x0 = 8, GPR.pc = 520.
 namespace {
+std::uint64_t g_virtualCount = 0;
+
 constexpr std::size_t kStateGprOffset = 536;
 constexpr std::size_t kGprX0Offset = 8;
 constexpr std::size_t kGprPcOffset = 520;
@@ -204,22 +208,85 @@ Memory* __remill_async_hyper_call(State& state, addr_t ret_addr, Memory* mem) {
 // instruction as an error call carrying the guest PC, then keeps lifting the
 // rest of the trace. That is the seam we service syscalls through, so this
 // reads the instruction at that PC and dispatches when it really is an SVC.
+// Applies a decoded system-register move to the guest's register file.
+//
+// The pointer registers live in State.sr; the counter and the CPU id are
+// fabricated, since there is no hardware here to read.
+//
+// Returns true when the instruction was recognised and executed.
+bool TrySystemRegisterAccess(State& state, std::uint32_t insn) {
+    const auto move = libkernel::DecodeSystemRegisterMove(insn);
+    if (!move.valid)
+        return false;
+
+    // Offsets measured against remill/Arch/AArch64/Runtime/State.h.
+    constexpr std::size_t kRegX0 = 544;
+    constexpr std::size_t kStride = 16;
+    constexpr std::size_t kStateTpidrEl0Offset = 1112;
+    constexpr std::uint64_t kMainIdEl1 = 0x410FD034ull; // Cortex-A57-ish
+
+    auto* base = reinterpret_cast<std::uint8_t*>(&state);
+    auto* rt = base + kRegX0 + static_cast<std::size_t>(move.rt) * kStride;
+
+    std::uint64_t value = 0;
+    if (move.kind == libkernel::MoveKind::Read) {
+        switch (move.reg) {
+            case libkernel::SystemRegister::ThreadPointer:
+            case libkernel::SystemRegister::ThreadPointerReadOnly:
+                std::memcpy(&value, base + kStateTpidrEl0Offset, sizeof(value));
+                break;
+            case libkernel::SystemRegister::VirtualCount:
+                // A free-running counter is better than a constant one: guests
+                // measure elapsed time with this.
+                ++g_virtualCount;
+                value = g_virtualCount;
+                break;
+            case libkernel::SystemRegister::MainId:
+                value = kMainIdEl1;
+                break;
+            case libkernel::SystemRegister::Unknown:
+            default:
+                return false;
+        }
+        if (move.is64)
+            std::memcpy(rt, &value, sizeof(value));
+        else
+            std::memset(rt, 0, sizeof(value));
+        return true;
+    }
+
+    if (move.kind == libkernel::MoveKind::Write) {
+        if (move.reg == libkernel::SystemRegister::ThreadPointer && move.is64)
+            std::memcpy(base + kStateTpidrEl0Offset, rt, sizeof(std::uint64_t));
+        else if (move.reg == libkernel::SystemRegister::Unknown)
+            return false;
+        return true;
+    }
+    return false;
+}
+
 Memory* __remill_error(State& state, addr_t addr, Memory* mem) {
-    // Remill reports an unhandled SVC through this entry point, but it passes
-    // the PC *after* the instruction rather than the instruction's own PC, so
-    // both candidates are checked.
+    // Remill reports instructions it cannot lift through this entry point, and
+    // it passes the PC *after* the instruction rather than the instruction's
+    // own PC, so both candidates are checked. Two classes matter: a supervisor
+    // call, which is a syscall, and a system-register move, which on AArch64 is
+    // unimplemented for TPIDR_EL0.
     if (mem) {
         for (const addr_t pc : {addr - 4, addr}) {
             if (pc + 4 > mem->size)
                 continue;
             std::uint32_t insn = 0;
             std::memcpy(&insn, mem->data + pc, 4);
+
             // SVC #imm : bits 31-24 = 0xD4, immediate in bits 20-5.
             if ((insn & 0xFF000000u) == 0xD4000000u) {
                 const auto svc = static_cast<std::uint64_t>((insn >> 5) & 0xFFFFu);
                 ServiceSyscall(state, svc, mem);
                 return mem;
             }
+
+            if (TrySystemRegisterAccess(state, insn))
+                return mem;
         }
     }
     std::fprintf(stderr, "anyswitch: unlifted instruction at guest 0x%llx\n",

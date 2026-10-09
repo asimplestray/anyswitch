@@ -13,6 +13,8 @@ add_library(libkernel STATIC
     src/Memory.cpp
     src/Handle.cpp
     src/Info.cpp
+    src/Sessions.cpp
+    src/SystemRegisters.cpp
 )
 
 target_include_directories(libkernel PUBLIC
@@ -28,6 +30,8 @@ add_library(libkernel_prx SHARED
     src/Memory.cpp
     src/Handle.cpp
     src/Info.cpp
+    src/Sessions.cpp
+    src/SystemRegisters.cpp
 )
 
 target_include_directories(libkernel_prx PUBLIC

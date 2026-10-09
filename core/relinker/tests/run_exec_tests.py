@@ -37,11 +37,14 @@ def build_runtime(workdir: str):
     """
     jobs = [
         ("runtime/AnyswitchRuntime.cpp", ["libkernel/include"]),
+        ("runtime/Driver.cpp", ["libkernel/include"]),
         ("runtime/Syscalls.cpp", ["libkernel/include"]),
         ("libkernel/src/Dispatch.cpp", ["libkernel/include"]),
         ("libkernel/src/Memory.cpp", ["libkernel/include"]),
         ("libkernel/src/Handle.cpp", ["libkernel/include"]),
         ("libkernel/src/Info.cpp", ["libkernel/include"]),
+        ("libkernel/src/Sessions.cpp", ["libkernel/include"]),
+        ("libkernel/src/SystemRegisters.cpp", ["libkernel/include"]),
     ]
     outs = []
     for src, extra in jobs:
@@ -115,6 +118,7 @@ def main() -> int:
 
         e = dict(os.environ)
         e["ANYSWITCH_EMIT_OBJECT"] = obj
+        e["ANYSWITCH_EMIT_TRACES"] = table = os.path.join(probe_dir, f"{name}.traces")
         r = subprocess.run([args.relinker, "--to-intel", nro,
                             os.path.join(probe_dir, f"{name}.elf")],
                            capture_output=True, text=True, env=e)
@@ -124,7 +128,7 @@ def main() -> int:
             continue
 
         link = subprocess.run(
-            ["g++", "-std=c++20", "-w", "-I", REPO, "-I", REMILL_INCLUDE,
+            ["g++", "-std=c++20", "-w", "-rdynamic", "-I", REPO, "-I", REMILL_INCLUDE,
              "-I", LIBKERNEL_INCLUDE,
              "-o", exe, main_cpp, obj, *runtime_objs, "-lm"],
             capture_output=True, text=True)
@@ -146,7 +150,7 @@ def main() -> int:
                 out.write(f.read(text_size))
 
         trace = dict(os.environ, ANYSWITCH_TRACE_SYSCALLS="1")
-        run = subprocess.run([exe, text_path], capture_output=True, text=True,
+        run = subprocess.run([exe, text_path, table], capture_output=True, text=True,
                              env=trace)
         got = run.stdout.strip()
         ok = got == f"X0={want}"

@@ -427,6 +427,22 @@ public:
             });
         }
 
+        // The trace table: guest PC -> symbol name for every lifted trace.
+        // This is what lets a runtime chain traces instead of running one and
+        // stopping, which is the difference between seeing one basic block and
+        // seeing a program.
+        if (const char* table = std::getenv("ANYSWITCH_EMIT_TRACES")) {
+            if (*table) {
+                std::ofstream ofs(table);
+                if (!ofs)
+                    throw std::runtime_error("Cannot open trace table output");
+                for (const auto& pc : result.CodeOffsets) {
+                    if (symAddrs.contains(TraceSymbolName(pc)))
+                        ofs << std::hex << pc << " " << TraceSymbolName(pc) << "\n";
+                }
+            }
+        }
+
         // Emit the relocatable object so an external harness can link it
         // against the guest runtime and execute the result.
         if (const char* obj = std::getenv("ANYSWITCH_EMIT_OBJECT")) {

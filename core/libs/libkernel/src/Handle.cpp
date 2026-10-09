@@ -21,6 +21,8 @@ namespace {
 constexpr std::uint32_t kFirstFakeHandle = 0x80000000u;
 std::uint32_t g_nextHandle = kFirstFakeHandle;
 
+std::uint32_t AllocHandle() { return g_nextHandle++; }
+
 bool WriteU32(Memory& mem, std::uint64_t addr, std::uint32_t value) {
     if (addr + sizeof(value) > mem.size)
         return false;
@@ -28,15 +30,9 @@ bool WriteU32(Memory& mem, std::uint64_t addr, std::uint32_t value) {
     return true;
 }
 
-std::uint32_t AllocHandle() { return g_nextHandle++; }
-
 void Succeed(SyscallArgs& args) { args.x[0] = kResultSuccess; }
 
 } // namespace
-
-// Resets the synthetic handle space. Tests call this to get deterministic
-// handles back.
-void ResetHandleSpace() { g_nextHandle = kFirstFakeHandle; }
 
 // svcCloseHandle(Handle handle) -> result
 void SvCloseHandle(SyscallArgs& args, Memory&) { Succeed(args); }
@@ -80,9 +76,6 @@ void SvCreateEvent(SyscallArgs& args, Memory& mem) {
     args.x[1] = w;
     args.x[2] = r;
 }
-
-// svcReplyAndReceiveLight(Handle) -> result
-void SvReplyAndReceiveLight(SyscallArgs& args, Memory&) { Succeed(args); }
 
 // svcGetCurrentProcessorNumber() -> cpu id
 void SvGetCurrentProcessorNumber(SyscallArgs& args, Memory&) { args.x[0] = 0; }

@@ -1,55 +1,104 @@
 // Execution harness: runs translated ARM64 code on the host and reports X0.
 //
-// Links against the object emitted by the relinker (ANYSWITCH_EMIT_OBJECT)
-// plus the native runtime, allocates the guest State and Memory, calls the
-// entry trace, and prints the resulting X0. The guest program is expected to
-// place its result in X0 before RET.
+// Links against the object emitted by the relinker (ANYSWITCH_EMIT_OBJECT),
+// resolves each lifted trace by symbol, and drives them through the runtime's
+// trace-chaining loop rather than calling one block and stopping.
 //
 // There is no interpreter here: the code being called was already translated
 // to x86-64 ahead of time. This only provides the register file, the guest
-// address space, and the hypercall seam Remill's semantics call into.
+// address space, the hypercall seam, and the loop that threads control between
+// translated blocks.
+//
+// ANYSWITCH_EMIT_TRACES supplies the guest-PC-to-symbol table the driver needs.
 
+#include <dlfcn.h>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <sstream>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "core/libs/runtime/AnyswitchRuntime.hpp"
+#include "core/libs/runtime/Driver.hpp"
 #include "libkernel/SyscallAbi.hpp"
-
-// The entry trace, produced by the relinker and named asw_trace_<guest addr>.
-extern "C" void* asw_trace_0(void* state, unsigned long pc, void* memory);
 
 namespace {
 
-// Register-file offsets measured from remill/Arch/AArch64/Runtime/State.h.
+// Register-file offsets measured against remill/Arch/AArch64/Runtime/State.h.
 constexpr std::size_t kStateGprOffset = 536;
 constexpr std::size_t kGprX0Offset = 8;
+constexpr std::size_t kStateX0Offset = kStateGprOffset + kGprX0Offset;
+
+// Loads the PC -> symbol table the relinker emits.
+class SymbolTraceMap : public anyswitch::TraceMap {
+public:
+    SymbolTraceMap(const char* tablePath) {
+        std::ifstream in(tablePath);
+        if (!in) {
+            std::fprintf(stderr, "harness: cannot read trace table %s\n", tablePath);
+            return;
+        }
+        std::string line;
+        while (std::getline(in, line)) {
+            std::istringstream ls(line);
+            std::uint64_t pc = 0;
+            std::string symbol;
+            if (ls >> std::hex >> pc >> symbol) {
+                // The object is linked into this executable with -rdynamic, so
+                // its symbols are resolvable through the default handle.
+                auto* fn = reinterpret_cast<anyswitch::TraceFunction>(
+                    dlsym(RTLD_DEFAULT, symbol.c_str()));
+                if (fn != nullptr)
+                    _map.emplace(pc, fn);
+            }
+        }
+    }
+
+    std::size_t Size() const { return _map.size(); }
+
+    anyswitch::TraceFunction Lookup(std::uint64_t guestPc) const override {
+        const auto it = _map.find(guestPc);
+        return it == _map.end() ? nullptr : it->second;
+    }
+
+private:
+    std::unordered_map<std::uint64_t, anyswitch::TraceFunction> _map;
+};
 
 std::uint64_t ReadX0(const void* state) {
-    const auto* gpr = static_cast<const std::uint8_t*>(state) + kStateGprOffset;
     std::uint64_t v = 0;
-    std::memcpy(&v, gpr + kGprX0Offset, sizeof(v));
+    std::memcpy(&v, static_cast<const std::uint8_t*>(state) + kStateX0Offset, sizeof(v));
     return v;
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
-    // The guest image (.text) is mapped at base 0 so the runtime can read
-    // instructions from the PC it is handed - that is how an SVC is
-    // recognised and dispatched. argv[1] optionally overrides the image.
+    const char* imagePath = nullptr;
+    const char* tablePath = std::getenv("ANYSWITCH_TRACE_TABLE");
+    if (argc > 1)
+        imagePath = argv[1];
+    if (argc > 2)
+        tablePath = argv[2];
+
+    if (tablePath == nullptr) {
+        std::fprintf(stderr, "harness: no trace table (set ANYSWITCH_TRACE_TABLE)\n");
+        return 2;
+    }
+
     // A guest address space big enough for the image, its heap and a working
     // set. The console gives a process far more than this, but it is the order
     // of magnitude a small homebrew needs.
-    // The reported heap region sits at 256 MiB, so the address space has to
-    // cover it: image + heap + working set.
     const std::size_t memSize = 512u << 20; // 512 MiB
     anyswitch::GuestMemory mem(memSize, 0);
 
     std::vector<std::uint8_t> image;
-    if (argc > 1) {
-        std::FILE* f = std::fopen(argv[1], "rb");
+    if (imagePath != nullptr) {
+        std::FILE* f = std::fopen(imagePath, "rb");
         if (f) {
             std::fseek(f, 0, SEEK_END);
             const long n = std::ftell(f);
@@ -64,32 +113,41 @@ int main(int argc, char** argv) {
     // Map the guest image at base 0 so the runtime can read instructions from
     // the PCs it is handed; that is how an SVC is recognised and dispatched.
     if (!image.empty() && !mem.Write(0, image.data(), image.size()))
-        std::fprintf(stderr, "warning: guest image does not fit the address space\n");
-    else
+        std::fprintf(stderr, "harness: guest image does not fit the address space\n");
+    else if (!image.empty())
         libkernel::SetLoadedImageBytes(image.size());
 
-    // The kernel hands a thread its TLS block through TPIDR_EL0. Both of the
-    // homebrew binaries read it on every TLS access (68 and 47 MRS sites
-    // respectively), so leaving it zero means every derived pointer is null.
-    // Point it at a zeroed area of the guest mapping that the heap does not
+    // The kernel hands a thread its TLS block through TPIDR_EL0. Both homebrew
+    // binaries read it on every TLS access, so leaving it zero means every
+    // derived pointer is null. Point it at a zeroed area the heap does not
     // overlap.
     constexpr std::uint64_t kTcbAddress = 0x8000000ull; // 128 MiB
     constexpr std::size_t kStateTpidrEl0Offset = 1112;
 
     // Remill's State is a padded register file; zero it so flags start clean.
     std::vector<std::uint8_t> stateBytes(1200 + 64, 0);
+    auto* state = reinterpret_cast<State*>(stateBytes.data());
+    std::memcpy(stateBytes.data() + kStateTpidrEl0Offset, &kTcbAddress,
+                sizeof(kTcbAddress));
 
-    auto* state = stateBytes.data();
-    if (!mem.Write(kTcbAddress, stateBytes.data(), 1)) {
-        // Just touching one byte is enough to confirm the address is mapped.
-        std::fprintf(stderr, "warning: TLS address is not mapped\n");
+    SymbolTraceMap traces(tablePath);
+    if (traces.Size() == 0) {
+        std::fprintf(stderr, "harness: no traces resolved from %s\n", tablePath);
+        return 2;
     }
-    std::memcpy(state + kStateTpidrEl0Offset, &kTcbAddress, sizeof(kTcbAddress));
 
-    auto* result = asw_trace_0(state, 0, mem.Handle());
+    anyswitch::DriveLimits limits;
+    // A guest that never terminates should not run the machine dry; drop the
+    // ceiling right down for a diagnostic run but leave it generous normally.
+    if (const char* env = std::getenv("ANYSWITCH_MAX_TRACES"))
+        limits.maxTraces = std::strtoull(env, nullptr, 10);
 
-    std::printf("X0=%llu\n", static_cast<unsigned long long>(ReadX0(state)));
-    if (!result)
-        std::fprintf(stderr, "warning: trace returned null memory handle\n");
+    std::uint64_t exitPc = 0;
+    const auto finished = anyswitch::Drive(*state, mem.Handle(), 0, traces, limits, exitPc);
+
+    std::printf("X0=%llu\n", static_cast<unsigned long long>(ReadX0(stateBytes.data())));
+    if (!finished)
+        std::fprintf(stderr, "harness: stopped at guest PC 0x%llx (%zu traces mapped)\n",
+                     static_cast<unsigned long long>(exitPc), traces.Size());
     return 0;
 }
