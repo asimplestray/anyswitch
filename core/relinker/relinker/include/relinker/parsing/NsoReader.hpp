@@ -8,8 +8,8 @@ namespace Relinker {
 
 // Nintendo Switch NSO0 loader.
 //
-// Layout (see switchbrew NSO docs, hactool nso.c): a 0x100-byte header with
-// three segment extents (.text/.rodata/.data) plus LZ4-compressed payloads.
+// Layout (see the switchbrew NSO0 format documentation): a 0x100-byte header
+// with three segment extents (.text/.rodata/.data) plus LZ4-compressed payloads.
 // Compressed sizes live at 0x60/0x64/0x68; flag bits 0-2 mark compressed
 // segments and bit 7 selects ZBIC (zstd) instead of LZ4.
 //

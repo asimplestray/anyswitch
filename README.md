@@ -98,7 +98,7 @@ Good first issues are labeled `good first issue`. See [CONTRIBUTING.md](CONTRIBU
 
 ## Legal
 
-Interoperability and preservation only. This project ships no games, keys, firmware, or Nintendo code. Decrypt only games you own, with your own keys (e.g. `hactool` + `keys.txt`). All system libraries are clean-room host reimplementations against publicly documented interfaces.
+Interoperability and preservation only. This project ships no games, keys, firmware, or Nintendo code. It consumes user-provided decrypted binaries; the decryption process is outside this project's scope. All system libraries are clean-room host reimplementations against publicly documented interfaces.
 
 ## License
 

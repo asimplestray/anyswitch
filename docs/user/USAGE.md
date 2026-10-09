@@ -25,17 +25,17 @@ cmake --build build --parallel
 
 ## Porting a Game
 
-### Step 1: Decrypt your game
+### Step 1: Obtain a decrypted Switch binary
 
-You need a decrypted Switch game (`.nso` files). Use `hactool`:
+AnySwitch consumes **user-provided, already-decrypted** executables
+(`.nro` / `.nso`). Homebrew `.nro` files are plaintext and work out of the
+box — no additional steps.
 
-```bash
-hactool --intype nsp --extract-dir game_dump game.nsp
-# or for XCI:
-hactool --intype xci --extract-dir game_dump game.xci
-```
-
-You must provide your own `keys.txt` file. AnySwitch does not provide keys.
+For commercial games you must supply a decrypted copy that you legally own.
+AnySwitch does not ship, generate, or provide decryption tooling, keys, or
+firmware, and this project does not document that process. Our pipeline
+starts at the point where you already hold a decrypted binary; how you got
+there is outside this project's scope and support.
 
 ### Step 2: Prepare directory layout
 

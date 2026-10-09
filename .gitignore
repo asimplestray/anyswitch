@@ -55,10 +55,18 @@ __pycache__/
 # Keys, firmware, game dumps — never commit these
 *.nsp
 *.xci
+*.nca
+*.nro
+*.nso
+*.kip
+*.rpx
 keys.txt
+*.keys
 prod.keys
 title.keys
 game_dump/
 romfs/
 exefs/
+atmosphere/
+*.titlekeys
 kilo.json

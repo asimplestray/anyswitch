@@ -72,8 +72,8 @@ AnySwitch/
 ## How to Port a Switch Game
 
 ```bash
-# 1. Decrypt your own game (user responsibility)
-# Use hactool with your keyset to unpack .nsp/.xci → main.nso
+# 1. Start from a decrypted main.nso you already have (user responsibility;
+#    decryption is outside this project's scope and not documented here)
 
 # 2. Run the relinker
 ./build/core/relinker/relinker \
@@ -94,9 +94,11 @@ cp -r game_assets/ game_output/app0/
 ## Legal
 
 This project is for **interoperability and preservation only**. It:
-- Does not include, distribute, or require copyrighted firmware
-- Does not include cryptographic keys
-- Requires users to decrypt their own legally-owned games
+- Does not include, distribute, or provide copyrighted firmware
+- Does not include, generate, or provide cryptographic keys
+- Does not document or link to decryption tooling
+- Consumes user-provided, already-decrypted binaries; obtaining them is the
+  user's responsibility and outside this project's scope
 - Implements all system libraries from scratch using publicly documented interfaces
 
 Licensed under the MIT License. See LICENSE.
