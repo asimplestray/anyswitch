@@ -51,8 +51,8 @@ bool GuestMemory::Write(std::uint64_t addr, const void* in, std::size_t len) {
 // Remill intrinsics. Signatures must match remill/Arch/Runtime/Intrinsics.h.
 // ---------------------------------------------------------------------------
 
-// The comparisons arrive already computed by the semantics; the intrinsic is
-// a hook for instrumentation, so the default is the identity.
+// Comparisons arrive already computed by the semantics; the intrinsic is a
+// hook for instrumentation, so the default is the identity.
 #define DEFINE_COMPARE(name) \
     extern "C" bool __remill_compare_##name(bool result) { return result; }
 
@@ -68,6 +68,24 @@ DEFINE_COMPARE(ugt)
 DEFINE_COMPARE(uge)
 
 #undef DEFINE_COMPARE
+
+// Condition-flag helpers: same reasoning as the comparisons above.
+extern "C" bool __remill_flag_computation_zero(bool result, ...) { return result; }
+extern "C" bool __remill_flag_computation_sign(bool result, ...) { return result; }
+extern "C" bool __remill_flag_computation_overflow(bool result, ...) { return result; }
+extern "C" bool __remill_flag_computation_carry(bool result, ...) { return result; }
+
+// Memory barriers and exclusives are no-ops on a strongly ordered host.
+extern "C" Memory* __remill_barrier_load_load(Memory* mem) { return mem; }
+extern "C" Memory* __remill_barrier_load_store(Memory* mem) { return mem; }
+extern "C" Memory* __remill_barrier_store_store(Memory* mem) { return mem; }
+extern "C" Memory* __remill_barrier_store_load(Memory* mem) { return mem; }
+extern "C" Memory* __remill_atomic_begin(Memory* mem) { return mem; }
+extern "C" Memory* __remill_atomic_end(Memory* mem) { return mem; }
+
+// An unimplemented instruction reported by the emulator path. There is no
+// emulator in this project, so this is a translation gap to report.
+extern "C" Memory* __remill_aarch64_emulate_instruction(Memory* mem) { return mem; }
 
 // Register/PC offsets, measured against remill/Arch/AArch64/Runtime/State.h:
 //   offsetof(AArch64State, gpr) = 536, GPR.x0 = 8, GPR.pc = 520.
@@ -198,6 +216,18 @@ DEFINE_WRITE(64, uint64_t)
 
 #undef DEFINE_WRITE
 
+Memory* __remill_write_memory_f32(Memory* mem, addr_t addr, float val) {
+    if (mem && addr + 4 <= mem->size)
+        std::memcpy(mem->data + addr, &val, 4);
+    return mem;
+}
+
+Memory* __remill_write_memory_f64(Memory* mem, addr_t addr, double val) {
+    if (mem && addr + 8 <= mem->size)
+        std::memcpy(mem->data + addr, &val, 8);
+    return mem;
+}
+
 uint8_t __remill_read_memory_8(Memory* mem, addr_t addr) {
     return (mem && addr < mem->size) ? mem->data[addr] : 0;
 }
@@ -215,5 +245,21 @@ DEFINE_READ(32, uint32_t)
 DEFINE_READ(64, uint64_t)
 
 #undef DEFINE_READ
+
+float __remill_read_memory_f32(Memory* mem, addr_t addr) {
+    if (!mem || addr + 4 > mem->size)
+        return 0.0f;
+    float v = 0.0f;
+    std::memcpy(&v, mem->data + addr, 4);
+    return v;
+}
+
+double __remill_read_memory_f64(Memory* mem, addr_t addr) {
+    if (!mem || addr + 8 > mem->size)
+        return 0.0;
+    double v = 0.0;
+    std::memcpy(&v, mem->data + addr, 8);
+    return v;
+}
 
 } // extern "C"

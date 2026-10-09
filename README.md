@@ -88,6 +88,8 @@ Without LLVM/Remill the project still configures and builds; codegen is disabled
 - [x] Parse NSO/NRO `.dynstr`/`.dynsym` to resolve import names
 - [x] Indirect-call fixups (BLR/BR) recorded and emitted as trampolines
 - [x] Guest syscalls reach the host (SVC → runtime dispatch, verified end to end)
+- [x] A real homebrew binary executes on the host (rainbow.nro: startup, main
+  loop and exit syscalls all serviced; see docs/dev/PROGRESS.md)
 - [ ] Dispatch trampolines through PLT/GOT instead of direct stubs
 - [ ] Link-time symbol resolution for real dynamic linking
 - [ ] Windows PE backend (`WindowsElfPatcher.cpp` stub)
