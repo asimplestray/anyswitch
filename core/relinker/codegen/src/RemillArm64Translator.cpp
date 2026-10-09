@@ -20,6 +20,8 @@
 #include <remill/BC/ABI.h>
 #include <remill/BC/InstructionLifter.h>
 #include <remill/BC/IntrinsicTable.h>
+#include <remill/BC/TraceLifter.h>
+#include <remill/BC/Util.h>
 #include <remill/OS/OS.h>
 
 #include <llvm/ADT/StringRef.h>
@@ -49,6 +51,8 @@
 #include <llvm/Target/TargetOptions.h>
 
 #include <cstdlib>
+#include <filesystem>
+#include <unordered_map>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -66,12 +70,6 @@ namespace {
 constexpr std::size_t kAArch64InstrSize = 4;
 constexpr std::size_t kMaxInstructions = 1024u * 1024u;
 constexpr const char* kX86Triple = "x86_64-pc-linux-gnu";
-
-std::string LiftedName(std::uint64_t guestAddr) {
-    std::ostringstream os;
-    os << "asw_lifted_" << std::hex << guestAddr;
-    return os.str();
-}
 
 std::string SemanticsPath() {
     if (const char* env = std::getenv("ANYSWITCH_AARCH64_BC"))
@@ -123,12 +121,13 @@ void Optimize(llvm::Module& mod) {
             used->eraseFromParent();
     }
     // The linked semantics bring ~500 functions; only a handful are called.
-    // Internalize everything except our entry points so GlobalDCE can
-    // actually drop the dead 99%.
+    // Internalize everything except our trace functions so GlobalDCE can
+    // actually drop the dead 99%. Traces stay external as the roots.
     for (auto& func : mod.functions()) {
-        if (!func.isDeclaration() && !func.getName().starts_with("asw_lifted_"))
+        if (!func.isDeclaration() && !func.getName().starts_with("asw_trace_"))
             func.setLinkage(llvm::GlobalValue::InternalLinkage);
     }
+    mpm.addPass(llvm::GlobalDCEPass());
     mpm.addPass(pb.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2));
     mpm.run(mod, mam);
 
@@ -200,6 +199,52 @@ std::vector<std::uint8_t> EmitObject(llvm::Module& mod,
     return text;
 }
 
+// Trace manager backed by the guest code buffer. Gives Remill byte-level
+// access for decoding and records every lifted trace.
+class CodeTraceManager : public remill::TraceManager {
+public:
+    CodeTraceManager(const std::vector<std::uint8_t>& code, Domain::VirtualAddress base)
+        : _code(code), _base(base) {}
+
+    // Name traces predictably so the fixup pass can find them in the object
+    // symbol table: asw_trace_<guest addr in hex>.
+    std::string TraceName(std::uint64_t addr) override {
+        std::ostringstream os;
+        os << "asw_trace_" << std::hex << addr;
+        return os.str();
+    }
+
+    void SetLiftedTraceDefinition(std::uint64_t addr, llvm::Function* lifted) override {
+        _traces[addr] = lifted;
+    }
+
+    llvm::Function* GetLiftedTraceDeclaration(std::uint64_t addr) override {
+        auto it = _traces.find(addr);
+        return it == _traces.end() ? nullptr : it->second;
+    }
+
+    llvm::Function* GetLiftedTraceDefinition(std::uint64_t addr) override {
+        return GetLiftedTraceDeclaration(addr);
+    }
+
+    bool TryReadExecutableByte(std::uint64_t addr, std::uint8_t* byte) override {
+        if (addr < _base)
+            return false;
+        const auto off = static_cast<std::size_t>(addr - _base);
+        if (off >= _code.size())
+            return false;
+        *byte = _code[off];
+        return true;
+    }
+
+    std::size_t LiftedCount() const { return _traces.size(); }
+
+private:
+    const std::vector<std::uint8_t>& _code;
+    Domain::VirtualAddress _base;
+    std::unordered_map<std::uint64_t, llvm::Function*> _traces;
+};
+
 } // namespace
 
 class RemillArm64Translator : public IArm64Translator {
@@ -228,20 +273,30 @@ public:
         llvm::LLVMContext context;
         auto mod = std::make_unique<llvm::Module>("arm64_translation", context);
 
-        auto arch = remill::Arch::Get(context, remill::kOSLinux,
-                                      remill::kArchAArch64LittleEndian);
+        // Build without the global cache so each Translate gets a clean arch.
+        auto arch = remill::Arch::Build(&context, remill::kOSLinux,
+                                        remill::kArchAArch64LittleEndian);
         if (!arch)
             throw std::runtime_error("Remill has no AArch64 backend");
 
-        LoadSemantics(*arch, *mod);
-        arch->PrepareModule(mod.get());
+        // LoadArchSemantics also calls PrepareModule + InitFromSemanticsModule,
+        // which is what populates the arch's intrinsic table. Skipping that was
+        // the cause of the old segfaults on re-decode.
+        auto sem = SemanticsDir();
+        std::vector<std::filesystem::path> semDirs;
+        if (!sem.empty())
+            semDirs.emplace_back(sem);
+        mod = remill::LoadArchSemantics(arch.get(), semDirs);
+        if (!mod)
+            throw std::runtime_error("Cannot load AArch64 semantics bitcode");
 
-        remill::IntrinsicTable intrinsics(mod.get());
-        remill::InstructionLifter lifter(arch.get(), intrinsics);
+        CodeTraceManager manager(arm64Code, baseVAddr);
+        remill::TraceLifter traceLifter(arch.get(), manager);
 
-        // Recursive descent: follow direct branches from the entry point so
-        // data pockets (literal pools, jump tables) are never decoded as
-        // code. Indirect targets are unknown statically and end a path.
+        // Pass 1 — discovery. Walk control flow from the entry point to find
+        // every reachable instruction and the set of trace heads (the entry
+        // plus every direct branch/call target). TraceLifter itself only
+        // follows block-external edges it is told about, so we seed it.
         const auto codeEnd = baseVAddr + arm64Code.size();
         auto inRange = [&](std::uint64_t pc) {
             return pc >= baseVAddr && pc + kAArch64InstrSize <= codeEnd &&
@@ -249,9 +304,9 @@ public:
         };
         std::set<std::uint64_t> visited;
         std::vector<std::uint64_t> worklist{baseVAddr};
-        // Indirect call/jump sites found while walking (guest addr, is_call).
-        // Collected here so we never re-decode after optimization strips the
-        // intrinsic table the decoder lazily builds.
+        // Trace heads, in discovery order, deduplicated.
+        std::set<std::uint64_t> traceHeads{baseVAddr};
+        // Indirect call/jump sites (guest addr, is_call) for the fixup pass.
         std::vector<std::pair<std::uint64_t, bool>> indirectSites;
 
         while (!worklist.empty() && visited.size() < kMaxInstructions) {
@@ -268,55 +323,54 @@ public:
                     pc, bytes, inst, arch->CreateInitialContext()))
                 continue; // data, not code
 
-            auto* func = arch->DefineLiftedFunction(LiftedName(pc), mod.get());
-            if (!func)
-                throw std::runtime_error("Cannot define lifted function");
-            if (func->getParent() != mod.get())
-                throw std::runtime_error("Lifted function in wrong module");
-            // DefineLiftedFunction pre-populates the entry block with state
-            // scaffolding; append into it rather than creating a new block.
-            auto* block = &func->getEntryBlock();
-            auto* state = func->getArg(0);
+            result.CodeOffsets.push_back(pc);
 
-            llvm::IRBuilder<> ir(block);
-            auto [nextPcAddr, nextPcTy] =
-                lifter.LoadRegAddress(block, state, remill::kNextPCVariableName);
-            ir.CreateStore(llvm::ConstantInt::get(nextPcTy, pc), nextPcAddr);
-
-            // Some forms decode but have no lifting support (e.g. MRS/MSR of
-            // unknown system registers). Drop the stub and keep walking.
-            if (lifter.LiftIntoBlock(inst, block, state) != remill::kLiftedInstruction) {
-                func->eraseFromParent();
-            } else {
-                auto [memAddr, memTy] =
-                    lifter.LoadRegAddress(block, state, remill::kMemoryVariableName);
-                ir.SetInsertPoint(block);
-                ir.CreateRet(ir.CreateLoad(memTy, memAddr));
-
-                if (llvm::verifyFunction(*func, &llvm::errs()))
-                    throw std::runtime_error("Lifted function failed verification");
-
-                result.CodeOffsets.push_back(pc);
-            }
-
-            if (inst.IsIndirectControlFlow())
+            if (inst.IsIndirectControlFlow()) {
                 indirectSites.emplace_back(pc, inst.IsFunctionCall());
-
-            if (inst.IsDirectControlFlow())
-                worklist.push_back(inst.branch_taken_pc);
-            const bool uncondJump = inst.IsDirectControlFlow() &&
-                                    !inst.IsConditionalBranch() && !inst.IsFunctionCall();
-            const bool indirectNoReturn =
-                inst.IsIndirectControlFlow() && !inst.IsFunctionCall();
-            if (inst.IsConditionalBranch() ||
-                (!uncondJump && !indirectNoReturn && !inst.IsFunctionReturn())) {
-                // Fallthrough: normal flow, untaken conditional edge, call return.
-                worklist.push_back(inst.next_pc);
+                continue; // target unknown statically; ends the trace
             }
+
+            if (inst.IsDirectControlFlow()) {
+                traceHeads.insert(inst.branch_taken_pc);
+                worklist.push_back(inst.branch_taken_pc);
+                if (!inst.IsConditionalBranch() && !inst.IsFunctionCall()) {
+                    // Unconditional jump: fallthrough is unreachable.
+                    continue;
+                }
+            }
+            if (!inst.IsFunctionReturn())
+                worklist.push_back(inst.next_pc);
         }
 
-        if (result.CodeOffsets.empty())
+        // Pass 2 — lift every trace head with real control flow. Each call
+        // produces one function with proper blocks and branch edges; traces
+        // calling each other compile to direct calls via the manager.
+        for (const auto head : traceHeads) {
+            if (!inRange(head))
+                continue;
+            traceLifter.Lift(head);
+        }
+
+        if (manager.LiftedCount() == 0) {
+            result.CodeOffsets.clear();
             return result;
+        }
+
+        // The semantics bitcode carries @llvm.compiler.used (900+ entries) to
+        // defeat DCE at Remill's own build time. We want the opposite: drop it
+        // so only what our traces call survives.
+        for (const char* name : {"llvm.compiler.used", "llvm.used"}) {
+            if (auto* used = mod->getGlobalVariable(name, true); used && used->use_empty())
+                used->eraseFromParent();
+        }
+
+        // The linked semantics bring ~500 functions; only a handful are called.
+        // Internalize everything except our trace functions so GlobalDCE can
+        // actually drop the dead 99%. Traces stay external as the roots.
+        for (auto& func : mod->functions()) {
+            if (!func.isDeclaration() && !func.getName().starts_with("asw_trace_"))
+                func.setLinkage(llvm::GlobalValue::InternalLinkage);
+        }
 
         StripExpectIntrinsics(*mod);
 
@@ -330,13 +384,13 @@ public:
         std::map<std::string, std::uint64_t> symAddrs;
         result.MachineCode = EmitObject(*mod, symAddrs);
 
-        // Emit fixups for indirect calls/jumps (BLR, BR) — target unknown statically.
-        // Sites were collected during the walk because re-decoding after the
-        // optimizer would touch freed intrinsics.
+        // Emit fixups for indirect calls/jumps (BLR/BR) — target unknown
+        // statically. Sites were collected during discovery because re-decoding
+        // after the optimizer would touch freed intrinsics.
         for (const auto& [guestAddr, isCall] : indirectSites) {
-            const auto it = symAddrs.find(LiftedName(guestAddr));
+            const auto it = symAddrs.find(TraceSymbolName(guestAddr));
             if (it == symAddrs.end())
-                continue; // instruction failed to lift
+                continue; // trace failed to lift
             result.Fixups.push_back({
                 it->second,
                 0,
@@ -376,24 +430,22 @@ public:
     }
 
 private:
-    static void LoadSemantics(const remill::Arch& arch, llvm::Module& mod) {
-        const auto path = SemanticsPath();
-        if (path.empty())
-            throw std::runtime_error(
-                "AArch64 semantics bitcode not configured (ANYSWITCH_AARCH64_BC)");
-        llvm::SMDiagnostic err;
-        auto sem = llvm::parseIRFile(path, err, mod.getContext());
-        if (!sem) {
-            std::string msg;
-            llvm::raw_string_ostream os(msg);
-            err.print("remill-translator", os);
-            throw std::runtime_error("Cannot parse semantics bitcode: " + msg);
-        }
-        if (llvm::Linker::linkModules(mod, std::move(sem)))
-            throw std::runtime_error("Cannot link AArch64 semantics");
-        // Populates register tables and the arch intrinsic table; required
-        // before any DecodeInstruction/LiftIntoBlock call.
-        arch.InitFromSemanticsModule(&mod);
+    // Directory holding the aarch64.bc semantics. LoadArchSemantics searches
+    // these dirs for the arch-named bitcode.
+    static std::string SemanticsDir() {
+        const std::string bc = SemanticsPath();
+        if (bc.empty())
+            return {};
+        const auto slash = bc.find_last_of('/');
+        if (slash == std::string::npos)
+            return {};
+        return bc.substr(0, slash);
+    }
+
+    static std::string TraceSymbolName(std::uint64_t guestAddr) {
+        std::ostringstream os;
+        os << "asw_trace_" << std::hex << guestAddr;
+        return os.str();
     }
 };
 

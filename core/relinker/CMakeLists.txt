@@ -46,6 +46,7 @@ if(ANYSWITCH_HAS_REMILL)
     target_compile_definitions(relinker PRIVATE
         ANYSWITCH_HAS_REMILL
         ANYSWITCH_HAS_LLVM
+        GLOG_USE_GLOG_EXPORT
     )
 
     # Arch/LLVM dylib builds ship a single libLLVM.so instead of per-component
@@ -60,6 +61,8 @@ if(ANYSWITCH_HAS_REMILL)
         target_include_directories(relinker PRIVATE
             ${CMAKE_SOURCE_DIR}/3rdparty/remill/include
             ${ANYSWITCH_REMILL_DEPS_DIR}/include
+            ${ANYSWITCH_REMILL_BUILD_DIR}/_deps/sleigh-src/support/include
+            ${ANYSWITCH_REMILL_BUILD_DIR}/_deps/sleigh-build/include
             ${LLVM_INCLUDE_DIRS}
         )
         target_compile_definitions(relinker PRIVATE
