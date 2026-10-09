@@ -67,6 +67,7 @@ if(ANYSWITCH_HAS_REMILL)
         )
         target_compile_definitions(relinker PRIVATE
             "ANYSWITCH_REMILL_AARCH64_BC=\"${ANYSWITCH_REMILL_BUILD_DIR}/lib/Arch/AArch64/Runtime/aarch64.bc\""
+            "ANYSWITCH_REMILL_INTRINSICS_BC=\"${ANYSWITCH_REMILL_BUILD_DIR}/lib/Arch/AArch64/Runtime/aarch64_Intrinsics.cpp.bc\""
         )
         target_link_libraries(relinker PRIVATE
             -Wl,--start-group

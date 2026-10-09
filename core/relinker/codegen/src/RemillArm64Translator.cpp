@@ -52,6 +52,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <unordered_map>
 #include <iomanip>
 #include <iostream>
@@ -101,6 +102,30 @@ void StripExpectIntrinsics(llvm::Module& mod) {
         call->eraseFromParent();
 }
 
+void WriteObjectToFile(const llvm::Module& mod, const char* path) {
+    std::string err;
+    const auto* target = llvm::TargetRegistry::lookupTarget(kX86Triple, err);
+    if (!target)
+        throw std::runtime_error("Cannot find x86-64 target: " + err);
+    llvm::TargetOptions opts;
+    std::unique_ptr<llvm::TargetMachine> tm(target->createTargetMachine(
+        llvm::Triple(kX86Triple), "generic", "", opts, std::nullopt, std::nullopt,
+        llvm::CodeGenOptLevel::Aggressive));
+    if (!tm)
+        throw std::runtime_error("Cannot create x86-64 TargetMachine");
+    std::error_code ec;
+    llvm::raw_fd_ostream out(path, ec);
+    if (ec)
+        throw std::runtime_error("Cannot open object output: " + ec.message());
+    llvm::legacy::PassManager pm;
+    if (tm->addPassesToEmitFile(pm, out, nullptr, llvm::CodeGenFileType::ObjectFile))
+        throw std::runtime_error("TargetMachine cannot emit object files");
+    auto& mutableMod = const_cast<llvm::Module&>(mod);
+    mutableMod.setTargetTriple(llvm::Triple(kX86Triple));
+    mutableMod.setDataLayout(tm->createDataLayout());
+    pm.run(mutableMod);
+}
+
 void Optimize(llvm::Module& mod) {
     llvm::LoopAnalysisManager lam;
     llvm::FunctionAnalysisManager fam;
@@ -144,7 +169,8 @@ void Optimize(llvm::Module& mod) {
 }
 
 std::vector<std::uint8_t> EmitObject(llvm::Module& mod,
-                                      std::map<std::string, std::uint64_t>& outAddrs) {
+                                      std::map<std::string, std::uint64_t>& outAddrs,
+                                      std::vector<std::uint8_t>* objOut) {
     std::string err;
     const auto* target = llvm::TargetRegistry::lookupTarget(kX86Triple, err);
     if (!target)
@@ -166,6 +192,9 @@ std::vector<std::uint8_t> EmitObject(llvm::Module& mod,
     if (tm->addPassesToEmitFile(pm, objStream, nullptr, llvm::CodeGenFileType::ObjectFile))
         throw std::runtime_error("TargetMachine cannot emit object files");
     pm.run(mod);
+
+    if (objOut)
+        objOut->assign(objBytes.begin(), objBytes.end());
 
     auto objOrErr = llvm::object::ObjectFile::createObjectFile(
         llvm::MemoryBufferRef(llvm::StringRef(objBytes.data(), objBytes.size()), "lifted"));
@@ -290,6 +319,23 @@ public:
         if (!mod)
             throw std::runtime_error("Cannot load AArch64 semantics bitcode");
 
+        // Link the intrinsics runtime so the pure helpers (__remill_compare_*)
+        // resolve and get inlined instead of staying undefined externs.
+        if (const char* ic = std::getenv("ANYSWITCH_REMILL_INTRINSICS_BC")) {
+            if (*ic) {
+                llvm::SMDiagnostic err;
+                auto intr = llvm::parseIRFile(ic, err, context);
+                if (!intr) {
+                    std::string msg;
+                    llvm::raw_string_ostream os(msg);
+                    err.print("anyswitch", os);
+                    throw std::runtime_error("Cannot parse intrinsics bitcode: " + msg);
+                }
+                if (llvm::Linker::linkModules(*mod, std::move(intr)))
+                    throw std::runtime_error("Cannot link AArch64 intrinsics");
+            }
+        }
+
         CodeTraceManager manager(arm64Code, baseVAddr);
         remill::TraceLifter traceLifter(arch.get(), manager);
 
@@ -382,7 +428,8 @@ public:
         Optimize(*mod);
 
         std::map<std::string, std::uint64_t> symAddrs;
-        result.MachineCode = EmitObject(*mod, symAddrs);
+        std::vector<std::uint8_t> objectBytes;
+        result.MachineCode = EmitObject(*mod, symAddrs, &objectBytes);
 
         // Emit fixups for indirect calls/jumps (BLR/BR) — target unknown
         // statically. Sites were collected during discovery because re-decoding
@@ -404,7 +451,16 @@ public:
         //   ANYSWITCH_DUMP_LIFTED=sym -> print symbol table
         //   ANYSWITCH_DUMP_LIFTED=bin -> write .text to /tmp/asw_text.bin
         //   ANYSWITCH_DUMP_LIFTED=bc  -> write pre-emit module to /tmp/asw_preemit.bc
-        if (const char* dump = std::getenv("ANYSWITCH_DUMP_LIFTED")) {
+        //   ANYSWITCH_EMIT_OBJECT=<p> -> write the relocatable object to <p>
+        if (const char* obj = std::getenv("ANYSWITCH_EMIT_OBJECT")) {
+            if (*obj) {
+                std::ofstream ofs(obj, std::ios::binary);
+                if (!ofs)
+                    throw std::runtime_error("Cannot open object output");
+                ofs.write(reinterpret_cast<const char*>(objectBytes.data()),
+                          static_cast<std::streamsize>(objectBytes.size()));
+            }
+        }        if (const char* dump = std::getenv("ANYSWITCH_DUMP_LIFTED")) {
             const std::string mode = dump;
             if (mode == "sym") {
                 std::cout << "Lifted symbols:\n";

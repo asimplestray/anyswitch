@@ -19,6 +19,16 @@ add_test(NAME host_libs_built
     COMMAND ${CMAKE_COMMAND} -E echo "libs: libc.prx libkernel.prx libnx.prx"
 )
 
+# Execution harness: hand-built .nro -> translate -> link native runtime -> run.
+# This is the test that proves translated code is semantically correct, not
+# merely that bytes get emitted.
+add_test(NAME relinker_executes_translated
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_SOURCE_DIR}/core/relinker/tests/run_exec_tests.py
+        --relinker $<TARGET_FILE:relinker>
+        --workdir ${CMAKE_CURRENT_BINARY_DIR}/exec
+)
+
 # End-to-end: synthetic ARM64 ELF + NSO fixtures (plain, LZ4, match-vector,
 # truncated) through the relinker. Needs Python 3 + the built binary.
 find_package(Python3 COMPONENTS Interpreter QUIET)
