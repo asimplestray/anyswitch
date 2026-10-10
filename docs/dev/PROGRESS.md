@@ -34,10 +34,24 @@ through instead of calling, so the guest ends up executing the zero word, which
 lifts to an error. That is the "unlifted instruction at guest 0x48cc" line,
 and it repeats because the same thing happens at every data run.
 
-So the next work is not "resolve indirect targets" in the abstract: it is to
-make a trace end at a call rather than fall through when the callee is unknown,
-and to give the driver a clean "no trace at this PC" stop instead of executing
-data. Only then does the guest's real control flow become observable.
+Both are done.
+
+Traces stop at data: every word the decoder cannot read is recorded, and
+TryReadExecutableByte refuses those bytes, so a trace ends at the boundary
+instead of walking into a literal pool. The repeating 0x48cc line is gone.
+
+The driver stops cleanly: when no trace exists at a PC it reports the PC and
+returns. Both binaries now terminate with a definite "stopped at guest PC"
+line, with the mapped trace count.
+
+A third defect surfaced on the way: the guest's stack pointer was never set,
+so every stack access computed an address below zero - visible as the panic's
+argument being a small negative number. The runtime now sets SP, the TLS
+block and a zeroed LR before entry, with the offsets measured rather than
+assumed (x30 is at 1024, not 1040; getting that wrong writes into x31).
+
+The remaining work is a small set of unlifted instructions (0x2760, 0x4ca0) and
+a panic path whose own message pointer is invalid.
 
 ## What the earlier run showed
 

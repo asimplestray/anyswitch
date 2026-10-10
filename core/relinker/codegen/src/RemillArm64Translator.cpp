@@ -102,6 +102,31 @@ void StripExpectIntrinsics(llvm::Module& mod) {
         call->eraseFromParent();
 }
 
+
+// Gives every declared-but-unlifted trace a body that reports the gap and
+// returns, instead of leaving it as an unresolvable declaration.
+//
+// This is what lets a trace end at a call to an unknown address: the call
+// becomes a real call to this stub, the stub reports, and control returns to
+// the caller just as a real function would. Without it the trace falls through
+// into whatever follows the call, which in these binaries is embedded data.
+void DefineMissingTraceStubs(llvm::Module& mod) {
+    auto& ctx = mod.getContext();
+    auto* i64 = llvm::Type::getInt64Ty(ctx);
+    auto* ptr = llvm::PointerType::get(ctx, 0);
+    auto* handlerType = llvm::FunctionType::get(ptr, {ptr, i64, ptr}, false);
+    auto handler = mod.getOrInsertFunction("__anyswitch_missing_trace", handlerType);
+
+    for (auto& fn : mod.functions()) {
+        if (!fn.getName().starts_with("asw_trace_") || !fn.isDeclaration())
+            continue;
+        auto* block = llvm::BasicBlock::Create(ctx, "entry", &fn);
+        llvm::IRBuilder<> ir(block);
+        auto* result = ir.CreateCall(handler, {fn.getArg(0), fn.getArg(1), fn.getArg(2)});
+        ir.CreateRet(result);
+    }
+}
+
 void Optimize(llvm::Module& mod) {
     llvm::LoopAnalysisManager lam;
     llvm::FunctionAnalysisManager fam;
@@ -208,11 +233,18 @@ std::vector<std::uint8_t> EmitObject(llvm::Module& mod,
 // access for decoding and records every lifted trace.
 class CodeTraceManager : public remill::TraceManager {
 public:
-    CodeTraceManager(const std::vector<std::uint8_t>& code, Domain::VirtualAddress base)
-        : _code(code), _base(base) {}
+    // `dataBytes` are guest addresses the decoder could not read as an
+    // instruction. TraceLifter walks linearly from a trace head, so without
+    // these it runs straight through the literal pools and jump tables that sit
+    // inside .text and executes them.
+    CodeTraceManager(const std::vector<std::uint8_t>& code, Domain::VirtualAddress base,
+                     std::set<std::uint64_t> dataBytes)
+        : _code(code), _base(base), _dataBytes(std::move(dataBytes)) {}
 
-    // Name traces predictably so the fixup pass can find them in the object
-    // symbol table: asw_trace_<guest addr in hex>.
+    const std::set<std::uint64_t>& DataBytes() const { return _dataBytes; }
+
+    // Name traces predictably so the fixup pass and the runtime driver can
+    // find them in the object symbol table: asw_trace_<guest addr in hex>.
     std::string TraceName(std::uint64_t addr) override {
         std::ostringstream os;
         os << "asw_trace_" << std::hex << addr;
@@ -233,6 +265,8 @@ public:
     }
 
     bool TryReadExecutableByte(std::uint64_t addr, std::uint8_t* byte) override {
+        if (_dataBytes.contains(addr))
+            return false; // embedded data: a trace must stop here
         if (addr < _base)
             return false;
         const auto off = static_cast<std::size_t>(addr - _base);
@@ -247,6 +281,7 @@ public:
 private:
     const std::vector<std::uint8_t>& _code;
     Domain::VirtualAddress _base;
+    std::set<std::uint64_t> _dataBytes;
     std::unordered_map<std::uint64_t, llvm::Function*> _traces;
 };
 
@@ -311,9 +346,6 @@ public:
             }
         }
 
-        CodeTraceManager manager(arm64Code, baseVAddr);
-        remill::TraceLifter traceLifter(arch.get(), manager);
-
         // Pass 1 — discovery. Walk control flow from the entry point to find
         // every reachable instruction and the set of trace heads (the entry
         // plus every direct branch/call target). TraceLifter itself only
@@ -329,6 +361,8 @@ public:
         std::set<std::uint64_t> traceHeads{baseVAddr};
         // Indirect call/jump sites (guest addr, is_call) for the fixup pass.
         std::vector<std::pair<std::uint64_t, bool>> indirectSites;
+        // Every word the decoder refused, so traces stop at data boundaries.
+        std::set<std::uint64_t> dataBytes;
 
         while (!worklist.empty() && visited.size() < kMaxInstructions) {
             const auto pc = worklist.back();
@@ -341,8 +375,10 @@ public:
             std::string_view bytes(reinterpret_cast<const char*>(arm64Code.data() + offset),
                                    kAArch64InstrSize);
             if (!arch->DecodeInstruction(
-                    pc, bytes, inst, arch->CreateInitialContext()))
-                continue; // data, not code
+                    pc, bytes, inst, arch->CreateInitialContext())) {
+                dataBytes.insert(pc);
+                continue;
+            }
 
             result.CodeOffsets.push_back(pc);
 
@@ -368,9 +404,21 @@ public:
                 worklist.push_back(inst.next_pc);
         }
 
+        CodeTraceManager manager(arm64Code, baseVAddr, dataBytes);
+        remill::TraceLifter traceLifter(arch.get(), manager);
+
         // Pass 2 — lift every trace head with real control flow. Each call
-        // produces one function with proper blocks and branch edges; traces
-        // calling each other compile to direct calls via the manager.
+        // produces one function with proper blocks and branch edges.
+        //
+        // Declaring every head first is what makes a call between traces a real
+        // call: when the lifter resolves a call target it looks for a function
+        // of that name, and finds the declaration. Without it the target is
+        // unknown and the trace falls through into whatever follows the call,
+        // which in these binaries is embedded data.
+        for (const auto head : traceHeads) {
+            if (inRange(head))
+                arch->DeclareLiftedFunction(manager.TraceName(head), mod.get());
+        }
         for (const auto head : traceHeads) {
             if (!inRange(head))
                 continue;
@@ -381,6 +429,10 @@ public:
             result.CodeOffsets.clear();
             return result;
         }
+
+        // Bodies for traces that were only declared. Must happen before the
+        // optimiser so the calls to them resolve.
+        DefineMissingTraceStubs(*mod);
 
         // The semantics bitcode carries @llvm.compiler.used (900+ entries) to
         // defeat DCE at Remill's own build time. We want the opposite: drop it

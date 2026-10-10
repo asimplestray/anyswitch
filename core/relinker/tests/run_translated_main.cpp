@@ -121,14 +121,25 @@ int main(int argc, char** argv) {
     // binaries read it on every TLS access, so leaving it zero means every
     // derived pointer is null. Point it at a zeroed area the heap does not
     // overlap.
-    constexpr std::uint64_t kTcbAddress = 0x8000000ull; // 128 MiB
+    // The kernel hands a process its stack, its TLS block, and a thread
+    // pointer. The console sets all three before jumping to the entry point;
+    // leaving them zero makes every stack and TLS access compute a negative
+    // address, which is exactly the shape of the panics the guest was hitting.
+    constexpr std::uint64_t kTcbAddress = 0x8000000ull;        // 128 MiB
+    constexpr std::uint64_t kStackTop = 0x10000000ull;         // 256 MiB
     constexpr std::size_t kStateTpidrEl0Offset = 1112;
+    // Measured against remill/Arch/AArch64/Runtime/State.h.
+    constexpr std::size_t kStateSpOffset = 1040;
+    constexpr std::size_t kStateLrOffset = 1024;               // GPR.x30
 
     // Remill's State is a padded register file; zero it so flags start clean.
     std::vector<std::uint8_t> stateBytes(1200 + 64, 0);
     auto* state = reinterpret_cast<State*>(stateBytes.data());
     std::memcpy(stateBytes.data() + kStateTpidrEl0Offset, &kTcbAddress,
                 sizeof(kTcbAddress));
+    std::memcpy(stateBytes.data() + kStateSpOffset, &kStackTop, sizeof(kStackTop));
+    const std::uint64_t lr = 0; // no return address: the entry point is the root
+    std::memcpy(stateBytes.data() + kStateLrOffset, &lr, sizeof(lr));
 
     SymbolTraceMap traces(tablePath);
     if (traces.Size() == 0) {
