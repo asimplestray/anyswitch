@@ -138,6 +138,33 @@ Known gap in the fixture: the guest's rodata pointer is off by a few bytes,
 so the printed line starts mid-string. The mechanism is done; the fixture's
 address arithmetic is not.
 
+## Two attempts at function-boundary lifting, and why both failed
+
+The diagnosis was trace construction: TraceLifter inlines callees into
+callers, so the whole startup becomes one linear trace and the return
+stack is lost. Two fixes were tried against that, and both regressed.
+
+1. Breaking traces at calls (refusing the word after a BL) and making the
+   return address its own head. Result: the guest stopped at 0x2c instead of
+   0x1f0 - strictly earlier.
+
+2. Same, plus declaring the return address a trace head. Same result.
+
+The reason is now understood, and it rules the whole family of fixes out:
+refusing a byte does not just move a boundary, it stops the instruction
+*containing* it from being lifted correctly. The caller then reads the
+return address out of State instead of the callee's address, because the
+call that would have written the callee PC never got lifted properly. So
+the caller jumps to its own return address and the trace ends there.
+
+That means boundary control cannot be done through TryReadExecutableByte.
+It has to be done in the lifted IR - splitting the block the lifter
+produced, at the point where control leaves - or by lifting at function
+entries only and never walking through a call.
+
+What is left standing is the jump-only version, which is the state that
+removed every panic: RET and BR end a trace, calls fall through.
+
 ## What a real homebrew still needs
 
 1. **Real syscalls.** Memory mapping (`svc #1`/`#2`/`#3`), `QueryMemory`, and the

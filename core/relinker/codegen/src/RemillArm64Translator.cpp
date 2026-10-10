@@ -393,10 +393,18 @@ public:
             if (inst.IsIndirectControlFlow() && !isSyscall) {
                 indirectSites.emplace_back(pc, inst.IsFunctionCall());
                 if (!inst.IsFunctionCall()) {
-                    // RET and BR write the guest's PC to their target but do not
-                    // end the block, so anything the trace executes after them
-                    // overwrites that PC. Refusing the next word makes the trace
-                    // end here, which is where control really leaves.
+                    // RET and BR write the guest's PC to their target but do
+                    // not end the block, so anything the trace executes after
+                    // them overwrites that PC. Refusing the next word makes
+                    // the trace end here, which is where control really
+                    // leaves.
+                    //
+                    // Calls are deliberately NOT broken here. Refusing the
+                    // word after a call also stops the call itself from being
+                    // lifted correctly: the caller ends up observing the
+                    // return address instead of the callee, which loses more
+                    // than the inlining costs. Function-boundary lifting needs
+                    // a different mechanism.
                     traceEndBytes.insert(pc + kAArch64InstrSize);
                 }
                 continue; // target unknown statically; ends the trace
