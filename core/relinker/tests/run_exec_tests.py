@@ -152,15 +152,21 @@ def main() -> int:
         trace = dict(os.environ, ANYSWITCH_TRACE_SYSCALLS="1")
         run = subprocess.run([exe, nro, table], capture_output=True, text=True,
                              env=trace)
-        got = run.stdout.strip()
+        # The harness prints X0 last, and a guest may print before it.
+        lines = [l for l in run.stdout.splitlines() if l.strip()]
+        got = lines[-1].strip() if lines else ""
+        detail = " | ".join(lines)
         ok = got == f"X0={want}"
-        detail = got
-        # A syscall fixture must also reach the host: assert the dispatcher
-        # recognised it. 66 is ReplyAndReceiveLight in the real syscall table.
+        # A syscall fixture must also reach the host and produce output.
+        # 0x27 is OutputDebugString; the string the guest prints proves its
+        # own rodata was mapped and read through a pointer it computed.
         if name == "syscall":
-            if "svc #0x42" not in run.stderr:
+            if "svc #0x27" not in run.stderr:
                 ok = False
                 detail = f"{got} (syscall was not handled)"
+            elif "ANYSWITCH GUEST OUTPUT" not in run.stdout:
+                ok = False
+                detail = f"{got} (no guest output on the host)"
         if ok:
             print(f"PASS {name} -> {detail}")
             passed += 1

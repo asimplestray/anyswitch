@@ -21,6 +21,21 @@ import sys
 from make_synthetic_arm64_elf import align16
 
 
+def movz(reg: int, imm: int) -> bytes:
+    return struct.pack("<I", (1 << 31) | (0xA5 << 23) | (imm << 5) | reg)
+
+
+def load_imm32(reg: int, value: int) -> bytes:
+    """MOVZ/MOVK pair that materialises a 32-bit address, so fixtures do not
+    have to reason about page offsets by hand."""
+    out = struct.pack("<I", (1 << 31) | (0xA5 << 23) | ((value & 0xFFFF) << 5) | reg)
+    high = (value >> 16) & 0xFFFF
+    if high:
+        out += struct.pack("<I", (1 << 31) | (0xE5 << 23) | (1 << 21) |
+                           (high << 5) | reg)
+    return out
+
+
 def build_nro_text(text: bytes, rodata: bytes, data: bytes, bss: int = 0) -> bytes:
     """Minimal NRO0: 0x80 header, contiguous text/rodata/data."""
     text_mem, ro_mem = 0x0, align16(len(text))
@@ -139,9 +154,9 @@ def main() -> int:
 
     programs = {
         "ret42": mov_imm(0, 42) + ret(),
-        # A syscall in the middle of a trace: proves the guest->host seam and
-        # that discovery does not stop at the supervisor call.
-        "syscall": mov_imm(0, 42) + svc(66) + ret(),
+        # Prints its own rodata through svc #0x27, then exits. Proves the
+        # guest-to-host seam with data the guest reads itself.
+        "syscall": load_imm32(0, 0x5080 >> 4) + movz(1, 22) + svc(0x27) + svc(0x07),
         "add": mov_imm(0, 7) + add_imm(0, 0, 35) + ret(),
         "sub": mov_imm(0, 12) + sub_imm(0, 0, 5) + ret(),
         "branch_taken": mov_imm(0, 0) + cbz(0, 2) + mov_imm(0, 99) + mov_imm(0, 1) + ret(),
@@ -149,11 +164,25 @@ def main() -> int:
         "loop": build_loop(),
     }
 
+    # The printing fixture's address depends on where build_nro_text places
+    # rodata, so build it once with a placeholder, read the real offset back out
+    # of the header, then rebuild the fixture with the correct immediate.
+    rodata_overrides = {}
+    for _ in range(2):
+        prober = build_nro_text(programs["syscall"], b"S", b"\x00" * 16)
+        ro_mem = struct.unpack_from("<I", prober, 0x28)[0]
+        if ro_mem:
+            programs["syscall"] = (load_imm32(0, ro_mem) + movz(1, 22) +
+                                   struct.pack("<I", (0xD4 << 24) | (0x27 << 5) | 1) +
+                                   struct.pack("<I", (0xD4 << 24) | (7 << 5) | 1))
+            rodata_overrides["syscall"] = b"ANYSWITCH GUEST OUTPUT\x00"
+            break
+
     for name, code in programs.items():
-        path = os.path.join(outdir, f"{name}.nro")
-        with open(path, "wb") as f:
-            f.write(build_nro_text(code, b"RODATA", b"\x00" * 16))
-        print(f"wrote {path} ({len(code)} bytes of .text)")
+        msg = rodata_overrides.get(name, b"RODATA")
+        with open(os.path.join(outdir, f"{name}.nro"), "wb") as f:
+            f.write(build_nro_text(code, msg, b"\x00" * 16))
+
 
     with open(os.path.join(outdir, "expected.txt"), "w") as f:
         for name, x0 in (("ret42", 42), ("add", 42), ("sub", 7),

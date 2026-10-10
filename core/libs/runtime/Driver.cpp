@@ -3,6 +3,8 @@
 #include "remill/Arch/AArch64/Runtime/State.h"
 
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace anyswitch {
@@ -54,12 +56,16 @@ bool Drive(State& state, Memory* mem, std::uint64_t entryPc,
     std::uint64_t pc = entryPc;
     std::uint64_t executed = 0;
 
+    const bool tracePc = std::getenv("ANYSWITCH_TRACE_PC") != nullptr;
     while (executed++ < limits.maxTraces) {
         auto* trace = traces.Lookup(pc);
         if (trace == nullptr) {
             exitPc = pc;
             return false; // no trace at this PC: a translation gap
         }
+        if (tracePc)
+            std::fprintf(stderr, "  trace 0x%llx\n",
+                         static_cast<unsigned long long>(pc));
 
         mem = trace(&state, pc, mem);
         if (mem == nullptr) {
