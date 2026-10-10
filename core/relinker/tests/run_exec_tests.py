@@ -28,6 +28,13 @@ sys.path.insert(0, HERE)
 REMILL_INCLUDE = os.path.join(REPO, "3rdparty", "remill", "include")
 LIBKERNEL_INCLUDE = os.path.join(REPO, "core", "libs", "libkernel", "include")
 
+# SDL2 is used only for the window; headless machines still run.
+try:
+    SDLFLAGS = subprocess.run(["pkg-config", "--cflags", "--libs", "sdl2"],
+                              check=True, capture_output=True, text=True).stdout.split()
+except Exception:
+    SDLFLAGS = []
+
 
 def build_runtime(workdir: str):
     """Compiles the guest runtime, the dispatch shim, and libkernel.
@@ -38,6 +45,8 @@ def build_runtime(workdir: str):
     jobs = [
         ("runtime/AnyswitchRuntime.cpp", ["libkernel/include"]),
         ("runtime/Driver.cpp", ["libkernel/include"]),
+        ("runtime/Presentation.cpp", ["libkernel/include"]),
+        ("runtime/BitmapFont.cpp", ["libkernel/include"]),
         ("runtime/Syscalls.cpp", ["libkernel/include"]),
         ("libkernel/src/Dispatch.cpp", ["libkernel/include"]),
         ("libkernel/src/Memory.cpp", ["libkernel/include"]),
@@ -51,7 +60,7 @@ def build_runtime(workdir: str):
         path = os.path.join(REPO, "core", "libs", src)
         out = os.path.join(workdir, "libanyswitch_" + src.replace("/", "_") + ".o")
         cmd = ["g++", "-std=c++20", "-w", "-I", REMILL_INCLUDE, "-I", REPO,
-               "-c", path, "-o", out]
+               "-c", path, "-o", out] + SDLFLAGS
         for inc in extra:
             cmd += ["-I", os.path.join(REPO, "core", "libs", inc)]
         subprocess.run(cmd, check=True, capture_output=True)
@@ -130,27 +139,18 @@ def main() -> int:
         link = subprocess.run(
             ["g++", "-std=c++20", "-w", "-rdynamic", "-I", REPO, "-I", REMILL_INCLUDE,
              "-I", LIBKERNEL_INCLUDE,
-             "-o", exe, main_cpp, obj, *runtime_objs, "-lm"],
+             "-o", exe, main_cpp, obj, *runtime_objs, "-lm"] + SDLFLAGS,
             capture_output=True, text=True)
         if link.returncode != 0:
-            print(f"FAIL {name}: link failed: {link.stderr.strip()[:200]}")
+            print(f"FAIL {name}: link failed: {link.stderr.strip()[:600]}")
             failed += 1
             continue
 
-        # The runtime needs the guest image mapped at base 0 to recognise
-        # instructions (that is how an SVC is dispatched), so extract .text
-        # from the fixture and hand it over.
-        text_path = os.path.join(probe_dir, f"{name}.text")
-        with open(nro, "rb") as f:
-            hdr = f.read(0x80)
-            text_size = struct.unpack_from("<I", hdr, 0x24)[0]
-            text_path_size = 0x80 + text_size
-            f.seek(0x80)
-            with open(text_path, "wb") as out:
-                out.write(f.read(text_size))
-
+        # The harness maps every guest segment from the NRO itself, so the
+        # raw file is what it needs: code for the traces, and rodata/data for
+        # the pointers the guest dereferences.
         trace = dict(os.environ, ANYSWITCH_TRACE_SYSCALLS="1")
-        run = subprocess.run([exe, text_path, table], capture_output=True, text=True,
+        run = subprocess.run([exe, nro, table], capture_output=True, text=True,
                              env=trace)
         got = run.stdout.strip()
         ok = got == f"X0={want}"

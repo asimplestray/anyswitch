@@ -37,10 +37,18 @@ struct DriveLimits {
     std::uint64_t maxTraces = 100'000'000;
 };
 
+// Sets how a guest syscall reaches the host. The runtime provides this; the
+// driver only calls it, so the driver does not need to know about libkernel.
+using SyscallSink = bool (*)(State& state, std::uint64_t svc, Memory* mem);
+
 // Runs translated code from `entryPc`. Returns the PC control ended at, and
 // false if it stopped for a reason worth reporting (unknown PC, limit hit).
+//
+// AArch64 SVC does not call an intrinsic; the semantics only records the
+// hyper-call in State and returns. So after every trace the driver checks that
+// field and hands it to `onSyscall`, which is what makes syscalls work.
 bool Drive(State& state, Memory* mem, std::uint64_t entryPc,
            const TraceMap& traces, const DriveLimits& limits,
-           std::uint64_t& exitPc);
+           std::uint64_t& exitPc, SyscallSink onSyscall = nullptr);
 
 } // namespace anyswitch

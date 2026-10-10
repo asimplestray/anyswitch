@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstdlib>
 #include <cstring>
 
 namespace libkernel {
@@ -106,6 +105,12 @@ void SvGetSystemTick(SyscallArgs& args, Memory&) { args.x[0] = 1; }
 // The one syscall that produces host-visible output from guest data, so it is
 // worth treating carefully: the payload is a NUL-terminated string whose length
 // is the smaller of `len` and the distance to the terminator.
+// Implemented by the guest runtime, so libkernel stays free of SDL2 and of
+// any windowing dependency. Declared at global scope: an anonymous namespace
+// would give it internal linkage and the definition would not resolve.
+extern "C" void PresentGuestText(const char* text, std::size_t len);
+
+
 void SvOutputDebugString(SyscallArgs& args, Memory& mem) {
     const auto addr = args.x[0];
     const auto len = static_cast<std::size_t>(args.x[1]);
@@ -113,9 +118,12 @@ void SvOutputDebugString(SyscallArgs& args, Memory& mem) {
         std::size_t n = 0;
         while (n < len && mem.data[addr + n] != 0)
             ++n;
-        std::fwrite(mem.data + addr, 1, n, stdout);
+        const auto* text = reinterpret_cast<const char*>(mem.data + addr);
+        // Both destinations: a terminal for logs, the window for the demo.
+        std::fwrite(text, 1, n, stdout);
         std::fwrite("\n", 1, 1, stdout);
         std::fflush(stdout);
+        PresentGuestText(text, n);
     }
     args.x[0] = kResultSuccess;
 }

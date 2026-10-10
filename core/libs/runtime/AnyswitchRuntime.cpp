@@ -3,6 +3,8 @@
 #include "remill/Arch/AArch64/Runtime/State.h"
 #include "Syscalls.hpp"
 
+#include "Presentation.hpp"
+
 #include "libkernel/SystemRegisters.hpp"
 #include "remill/Arch/Runtime/HyperCall.h"
 #include "remill/Arch/Runtime/Intrinsics.h"
@@ -117,6 +119,13 @@ extern "C" double __remill_undefined_f64() { return 0.0; }
 
 // Register/PC offsets, measured against remill/Arch/AArch64/Runtime/State.h:
 //   offsetof(AArch64State, gpr) = 536, GPR.x0 = 8, GPR.pc = 520.
+// Called by libkernel's svcOutputDebugString so guest text reaches the window
+// without the libraries taking on an SDL2 dependency.
+extern "C" void PresentGuestText(const char* text, std::size_t len) {
+    if (text == nullptr || len == 0)
+        return;
+    anyswitch::Presentation::Get().AppendGuestText(std::string(text, len));
+}
 namespace {
 std::uint64_t g_virtualCount = 0;
 
@@ -266,6 +275,9 @@ bool TrySystemRegisterAccess(State& state, std::uint32_t insn) {
 }
 
 Memory* __remill_error(State& state, addr_t addr, Memory* mem) {
+    if (std::getenv("ANYSWITCH_DBG_REMILL"))
+        std::fprintf(stderr, "[remill_error] addr=%llu\n",
+                     static_cast<unsigned long long>(addr));
     // Remill reports instructions it cannot lift through this entry point, and
     // it passes the PC *after* the instruction rather than the instruction's
     // own PC, so both candidates are checked. Two classes matter: a supervisor

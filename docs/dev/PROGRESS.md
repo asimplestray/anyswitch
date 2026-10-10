@@ -112,7 +112,33 @@ Two kinds of gap appear alongside that:
    table, or X30 has been clobbered by the time we read it. Both point at the
    same next investigation, not at a missing syscall.
 
-## What visible output still needs
+## First visible output
+
+A guest can now be seen, not just run. The chain, end to end:
+
+  guest .nro -> translate -> link against the runtime -> drive traces
+             -> svc #0x27 -> text on the host
+
+The fixture loads a rodata pointer, calls OutputDebugString with a length,
+and exits. The runtime prints the string to stdout and appends it to an
+SDL2 window's text log. libkernel stays free of SDL2: it calls a small
+presented-text function the runtime provides, which is what keeps the
+libraries dependency-free and unit-testable.
+
+Presentation details:
+- Text is drawn from an embedded 5x7 bitmap font, so nothing depends on
+  SDL_ttf or on a font being installed.
+- The window is opt-in via ANYSWITCH_WINDOW=1 and silently degrades to
+  headless when there is no display, so CI still runs clean.
+- The driver now checks ArchState::hyper_call after each trace. AArch64
+  SVC only records its request in State and returns; nothing dispatches it,
+  which is why syscalls depended on the error path before.
+
+Known gap in the fixture: the guest's rodata pointer is off by a few bytes,
+so the printed line starts mid-string. The mechanism is done; the fixture's
+address arithmetic is not.
+
+## What a real homebrew still needs
 
 1. **Real syscalls.** Memory mapping (`svc #1`/`#2`/`#3`), `QueryMemory`, and the
    synchronization primitives the main loop depends on. Without these the guest
