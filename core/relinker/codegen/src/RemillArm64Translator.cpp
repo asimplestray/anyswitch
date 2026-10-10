@@ -233,15 +233,16 @@ std::vector<std::uint8_t> EmitObject(llvm::Module& mod,
 // access for decoding and records every lifted trace.
 class CodeTraceManager : public remill::TraceManager {
 public:
-    // `dataBytes` are guest addresses the decoder could not read as an
-    // instruction. TraceLifter walks linearly from a trace head, so without
-    // these it runs straight through the literal pools and jump tables that sit
-    // inside .text and executes them.
+    // `traceEndBytes` are guest addresses a trace must not walk past: words the
+    // decoder could not read (the literal pools and jump tables inside .text)
+    // and the instruction following an indirect jump. TraceLifter walks
+    // linearly from a trace head, so without these it runs straight through
+    // both and executes data, or clobbers the PC an indirect jump just wrote.
     CodeTraceManager(const std::vector<std::uint8_t>& code, Domain::VirtualAddress base,
-                     std::set<std::uint64_t> dataBytes)
-        : _code(code), _base(base), _dataBytes(std::move(dataBytes)) {}
+                     std::set<std::uint64_t> traceEndBytes)
+        : _code(code), _base(base), _traceEndBytes(std::move(traceEndBytes)) {}
 
-    const std::set<std::uint64_t>& DataBytes() const { return _dataBytes; }
+    const std::set<std::uint64_t>& TraceEndBytes() const { return _traceEndBytes; }
 
     // Name traces predictably so the fixup pass and the runtime driver can
     // find them in the object symbol table: asw_trace_<guest addr in hex>.
@@ -265,8 +266,8 @@ public:
     }
 
     bool TryReadExecutableByte(std::uint64_t addr, std::uint8_t* byte) override {
-        if (_dataBytes.contains(addr))
-            return false; // embedded data: a trace must stop here
+        if (_traceEndBytes.contains(addr))
+            return false; // a trace must stop at this boundary
         if (addr < _base)
             return false;
         const auto off = static_cast<std::size_t>(addr - _base);
@@ -281,7 +282,7 @@ public:
 private:
     const std::vector<std::uint8_t>& _code;
     Domain::VirtualAddress _base;
-    std::set<std::uint64_t> _dataBytes;
+    std::set<std::uint64_t> _traceEndBytes;
     std::unordered_map<std::uint64_t, llvm::Function*> _traces;
 };
 
@@ -361,8 +362,9 @@ public:
         std::set<std::uint64_t> traceHeads{baseVAddr};
         // Indirect call/jump sites (guest addr, is_call) for the fixup pass.
         std::vector<std::pair<std::uint64_t, bool>> indirectSites;
-        // Every word the decoder refused, so traces stop at data boundaries.
-        std::set<std::uint64_t> dataBytes;
+        // Words a trace must not walk past: undecodable data, and the
+        // instruction following an indirect jump.
+        std::set<std::uint64_t> traceEndBytes;
 
         while (!worklist.empty() && visited.size() < kMaxInstructions) {
             const auto pc = worklist.back();
@@ -376,7 +378,7 @@ public:
                                    kAArch64InstrSize);
             if (!arch->DecodeInstruction(
                     pc, bytes, inst, arch->CreateInitialContext())) {
-                dataBytes.insert(pc);
+                traceEndBytes.insert(pc);
                 continue;
             }
 
@@ -389,6 +391,13 @@ public:
                 inst.category == remill::Instruction::kCategoryAsyncHyperCall;
             if (inst.IsIndirectControlFlow() && !isSyscall) {
                 indirectSites.emplace_back(pc, inst.IsFunctionCall());
+                if (!inst.IsFunctionCall()) {
+                    // RET and BR write the guest's PC to their target but do not
+                    // end the block, so anything the trace executes after them
+                    // overwrites that PC. Refusing the next word makes the trace
+                    // end here, which is where control really leaves.
+                    traceEndBytes.insert(pc + kAArch64InstrSize);
+                }
                 continue; // target unknown statically; ends the trace
             }
 
@@ -404,7 +413,7 @@ public:
                 worklist.push_back(inst.next_pc);
         }
 
-        CodeTraceManager manager(arm64Code, baseVAddr, dataBytes);
+        CodeTraceManager manager(arm64Code, baseVAddr, traceEndBytes);
         remill::TraceLifter traceLifter(arch.get(), manager);
 
         // Pass 2 — lift every trace head with real control flow. Each call
