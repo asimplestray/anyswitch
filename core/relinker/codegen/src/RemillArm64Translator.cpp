@@ -50,6 +50,7 @@
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Target/TargetOptions.h>
 
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
